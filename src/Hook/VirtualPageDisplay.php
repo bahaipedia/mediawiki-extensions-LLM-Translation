@@ -19,33 +19,41 @@ class VirtualPageDisplay implements BeforeInitializeHook {
 	}
 
 	public function onBeforeInitialize( $title, $article, $output, $user, $request, $mediaWiki ): void {
-		// 1. Check if page exists. If it does, let MW handle it (it's a real page).
+		// 1. CRITICAL: Only run in Main Namespace (0)
+		// We do not want to interfere with Template:/fr, User:/es, etc.
+		if ( $title->getNamespace() !== NS_MAIN ) {
+			return;
+		}
+
+		// 2. Check if page exists. If it does, let MW handle it (it's a real page).
 		if ( $title->exists() ) {
 			return;
 		}
 
-		// 2. Check if it's a subpage (Parent/Child)
+		// 3. Check if it's a subpage (Parent/Child)
 		if ( !$title->isSubpage() ) {
 			return;
 		}
 
-		// 3. Check if the "Child" part is a generic language code (2-3 chars)
-		// You might want to make this stricter later
+		// 4. Check if the "Child" part is a generic language code
+		// We allow 2-3 char codes, plus specifically zh-cn/zh-tw
 		$parts = explode( '/', $title->getText() );
 		$langCode = end( $parts );
-		if ( strlen( $langCode ) > 3 && $langCode !== 'zh-cn' && $langCode !== 'zh-tw' ) {
+		$len = strlen( $langCode );
+		
+		$isValidLang = ( $len >= 2 && $len <= 3 ) || in_array( $langCode, [ 'zh-cn', 'zh-tw', 'pt-br' ] );
+		
+		if ( !$isValidLang ) {
 			return;
 		}
 
-		// 4. Check if Parent exists
+		// 5. Check if Parent exists
 		$parentTitle = $title->getBaseTitle();
 		if ( !$parentTitle || !$parentTitle->exists() ) {
 			return;
 		}
 
-		// 5. HIJACK THE DISPLAY
-		// This tells MediaWiki "Stop processing, we are handling this."
-		
+		// 6. HIJACK THE DISPLAY
 		$this->renderVirtualPage( $output, $parentTitle, $langCode, $title );
 	}
 
@@ -69,7 +77,6 @@ class VirtualPageDisplay implements BeforeInitializeHook {
 		$output->addModules( [ 'ext.geminitranslator.bootstrap' ] );
 
 		// Output the Shell HTML
-		// This is the container our JS will fill
 		$html = '<div class="gemini-virtual-container">';
 		$html .= '<div class="mw-message-box mw-message-box-notice">';
 		$html .= '<strong>Translated Content:</strong> This page is a real-time translation of <a href="' . $parent->getLinkURL() . '">' . $parent->getText() . '</a>.';
@@ -78,7 +85,7 @@ class VirtualPageDisplay implements BeforeInitializeHook {
 		$html .= '<div class="gemini-loading" style="text-align:center; padding: 50px; color: #888;">';
 		$html .= '<em>Generating translation for ' . htmlspecialchars( $lang ) . '...</em><br/>';
 		// Simple CSS spinner
-		$html .= '<div style="display:inline-block; width:20px; height:20px; border:3px solid #ccc; border-top-color:#333; border-radius:50%; animation: spin 1s linear infinite;"></div>';
+		$html .= '<div style="display:inline-block; width:20px; height:20px; margin-top:10px; border:3px solid #ccc; border-top-color:#333; border-radius:50%; animation: spin 1s linear infinite;"></div>';
 		$html .= '<style>@keyframes spin {0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}</style>';
 		$html .= '</div>';
 		$html .= '</div>'; // End content
@@ -86,14 +93,7 @@ class VirtualPageDisplay implements BeforeInitializeHook {
 
 		$output->addHTML( $html );
 
-		// Important: Prevent MediaWiki from showing the "Create this page" form
-		// We do this by effectively telling MW we are done, but we let the skin render around us.
-		// However, in BeforeInitialize, the easiest way to stop the "Edit" form 
-		// is often to set the action to 'view' and trick the output.
-		// A cleaner way in MW architecture is actually to let this hook finish 
-		// but ensure the Article object doesn't try to show the missing page form.
-		// But for now, we simply add the HTML. To suppress the 404 text, we might need CSS or further logic.
-		// Actually, the simplest way to suppress the "Create source" is:
+		// Suppress the "Create this page" form by forcing view mode
 		$request = $output->getRequest();
 		$request->setVal( 'action', 'view' );
 	}
