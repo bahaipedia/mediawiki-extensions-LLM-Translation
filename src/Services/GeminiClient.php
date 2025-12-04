@@ -51,8 +51,7 @@ class GeminiClient {
 			]
 		];
 
-		$req = $this->httpFactory->create( $url, [ 'method' => 'POST' ], __METHOD__ );
-		$req->setData( json_encode( $payload ) );
+		$req = $this->httpFactory->create( $url, [ 'method' => 'POST', 'postData' => json_encode( $payload ) ], __METHOD__ );
 		$req->setHeader( 'Content-Type', 'application/json' );
 		
 		// CRITICAL FIX: Send a Referer header to satisfy Google API Key "Website Restrictions"
