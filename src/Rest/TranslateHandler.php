@@ -70,12 +70,12 @@ class TranslateHandler extends SimpleHandler {
 		$services = MediaWikiServices::getInstance();
 		$parser = $services->getParser();
 		
-		// FIX: Use RequestContext::getMain() instead of $this->getContext()
 		$popts = ParserOptions::newFromContext( RequestContext::getMain() );
 		
+		// FIX: Use getPage() instead of getPageAsLinkTarget()
 		$output = $parser->parse( 
 			$sectionContent->getText(), 
-			$rev->getPageAsLinkTarget(), 
+			$rev->getPage(), 
 			$popts, 
 			true 
 		);
@@ -90,7 +90,6 @@ class TranslateHandler extends SimpleHandler {
 
 		if ( !$status->isOK() ) {
 			error_log( "GEMINI DEBUG: Translation failed: " . print_r($status->getErrors(), true) );
-			// Return a clean error to the frontend
 			return $this->getResponseFactory()->createJson( [ 'error' => $status->getErrors() ], 400 );
 		}
 
