@@ -1,96 +1,132 @@
-window.ext.adhocTranslation = window.ext.adhocTranslation || {};
-ext.adhocTranslation.Translator = function ( cfg ) {
-	this.$btn = cfg.$btn;
-	this.$content = cfg.$content;
-	this.$title = cfg.$title;
-	this.mode = cfg.mode;
-	this.revision = cfg.revision;
+window.ext = window.ext || {};
+window.ext.geminiTranslator = window.ext.geminiTranslator || {};
 
-	this.state = 'ready';
+( function ( mw, $ ) {
 
-	this.message = new OO.ui.MessageWidget();
-	this.message.$element.hide();
-	this.message.$element.insertBefore( this.$content );
+    function GeminiTranslator( $trigger ) {
+        this.$trigger = $trigger;
+        this.revision = mw.config.get( 'wgRevisionId' );
+        this.$content = $( '#mw-content-text > .mw-parser-output' );
+        
+        // Setup UI components
+        this.setupDialog();
+        
+        this.$trigger.on( 'click', this.openDialog.bind( this ) );
+    }
 
-	this.$original = this.$content.html();
-	this.originalTitle = this.$title.length ? this.$title.text() : '';
-	this.$btn.on( 'click', this.translate.bind( this ) );
-};
+    GeminiTranslator.prototype.setupDialog = function () {
+        // Create a simple Prompt dialog for language code
+        // In a future version, this should be a dropdown of supported languages
+        this.langInput = new OO.ui.TextInputWidget( { 
+            placeholder: 'es', 
+            value: 'es' 
+        } );
 
-OO.initClass( ext.adhocTranslation.Translator );
+        this.dialog = new OO.ui.ProcessDialog( {
+            size: 'medium'
+        } );
+        
+        // Hacky way to set title/actions on a generic ProcessDialog instance
+        this.dialog.title.setLabel( 'Translate Page' );
+        this.dialog.actions.set( [
+            { action: 'translate', label: 'Translate', flags: 'primary' },
+            { action: 'cancel', label: 'Cancel', flags: 'safe' }
+        ] );
 
-ext.adhocTranslation.Translator.prototype.translate = function ( e ) {
-	e.preventDefault();
-	if ( this.state !== 'ready' ) {
-		return;
-	}
-	this.showMessage( 'info', mw.msg( 'adhoctranslation-ui-translating' ) );
-	this.state = 'processing';
-	$.ajax( {
-		method: 'POST',
-		url: mw.util.wikiScript( 'rest' ) + '/adhoc-translation/translate_page/' + this.revision,
-		contentType: 'application/x-www-form-urlencoded',
-		data: {
-			content: this.mode === 'client' ? this.$content.html() : ''
-		}
-	} ).done( ( data ) => {
-		if ( data.hasOwnProperty( 'text' ) ) {
-			this.state = 'translated';
-			this.$content.html( data.text );
-			if ( data.title && this.$title.length ) {
-				this.$title.text( data.title );
-			}
+        this.dialog.initialize();
+        this.dialog.$body.append( 
+            $( '<p>' ).text( 'Enter target language code (e.g. es, fr, de):' ),
+            this.langInput.$element 
+        );
 
-			this.showMessage( 'info', mw.msg( 'adhoctranslation-ui-translated' ) );
-			this.addShowOriginalButton();
-		} else {
-			this.state = 'ready';
-			this.showMessage( 'error', mw.msg( 'adhoctranslation-ui-error' ) );
-		}
-	} ).fail( () => {
-		this.state = 'ready';
-		this.showMessage( 'info', mw.msg( 'adhoctranslation-ui-error' ) );
-	} );
-};
+        // Handle actions
+        this.dialog.getProcess = ( action ) => {
+            if ( action === 'translate' ) {
+                this.startTranslation( this.langInput.getValue() );
+                return new OO.ui.Process( () => { this.dialog.close(); } );
+            }
+            return new OO.ui.Process( () => { this.dialog.close(); } );
+        };
 
-ext.adhocTranslation.Translator.prototype.showOriginal = function ( e ) {
-	e.preventDefault();
-	this.$content.html( this.$original );
-	if ( this.$title.length ) {
-		this.$title.html( this.originalTitle );
-	}
-	this.message.$element.hide();
-};
+        var windowManager = new OO.ui.WindowManager();
+        $( 'body' ).append( windowManager.$element );
+        windowManager.addWindows( [ this.dialog ] );
+        this.windowManager = windowManager;
+    };
 
-ext.adhocTranslation.Translator.prototype.addShowOriginalButton = function () {
-	const $showOriginalButton = $( '<a>' ).text( mw.msg( 'adhoctranslation-ui-original' ) ).attr( 'href', '#' );
-	$showOriginalButton.on( 'click', this.showOriginal.bind( this ) );
-	$showOriginalButton.css( 'margin-left', '1em' );
-	this.message.$element.find( '.oo-ui-labelElement-label' ).append( $showOriginalButton );
-};
+    GeminiTranslator.prototype.openDialog = function ( e ) {
+        e.preventDefault();
+        this.windowManager.openWindow( this.dialog );
+    };
 
-ext.adhocTranslation.Translator.prototype.showMessage = function ( type, text ) {
-	this.message.setType( type );
-	this.message.setLabel( text );
-	this.message.$element.show();
-	this.state = 'ready';
-};
+    GeminiTranslator.prototype.startTranslation = function ( targetLang ) {
+        // Visual feedback
+        this.$content.css( 'opacity', '0.5' );
+        mw.notify( 'Starting translation...' );
 
-$( () => {
-	const $btn = $( '#ca-adhoc-translate' );
-	if ( !$btn.length ) {
-		return;
-	}
-	const revision = mw.config.get( 'wgRevisionId' );
-	if ( !revision ) {
-		$btn.remove();
-		return;
-	}
-	new ext.adhocTranslation.Translator( { // eslint-disable-line no-new
-		$btn: $btn,
-		$content: $( '#mw-content-text>.mw-parser-output' ),
-		$title: $( '#firstHeading>.mw-page-title-main' ),
-		mode: 'client',
-		revision: revision
-	} );
-} );
+        // 1. Translate Lead (Section 0)
+        this.fetchSection( 0, targetLang ).done( ( data ) => {
+            
+            // Clear existing content and replace with Lead
+            this.$content.html( data.html );
+            this.$content.css( 'opacity', '1' );
+            
+            // Add a container for subsequent sections
+            this.$restOfPage = $( '<div>' ).attr('id', 'gemini-translated-body').appendTo( this.$content );
+
+            // 2. Determine how many sections exist
+            // We can infer this from the TOC if it exists, or just try requesting until we get empty
+            // For robustness, let's just try fetching sections 1..10 sequentially
+            this.fetchNextSection( 1, targetLang );
+
+        } ).fail( ( err ) => {
+            console.error( err );
+            mw.notify( 'Translation failed.', { type: 'error' } );
+            this.$content.css( 'opacity', '1' );
+        } );
+    };
+
+    GeminiTranslator.prototype.fetchNextSection = function ( sectionId, targetLang ) {
+        // Visual indicator at bottom
+        var $loader = $( '<div>' ).text( 'Loading section ' + sectionId + '...' ).appendTo( this.$restOfPage );
+
+        this.fetchSection( sectionId, targetLang ).done( ( data ) => {
+            $loader.remove();
+            
+            if ( data.html && data.html.trim() !== '' ) {
+                // Append the new section
+                $( '<div>' ).html( data.html ).appendTo( this.$restOfPage );
+                
+                // Fetch the next one
+                this.fetchNextSection( sectionId + 1, targetLang );
+            } else {
+                // No more content
+                mw.notify( 'Translation complete!' );
+            }
+        } ).fail( () => {
+            $loader.remove();
+            // Assume failure means end of sections or error
+        } );
+    };
+
+    GeminiTranslator.prototype.fetchSection = function ( sectionId, targetLang ) {
+        return $.ajax( {
+            method: 'POST',
+            url: mw.util.wikiScript( 'rest' ) + '/gemini-translator/translate_section/' + this.revision,
+            contentType: 'application/json',
+            data: JSON.stringify( {
+                targetLang: targetLang,
+                section: sectionId
+            } )
+        } );
+    };
+
+    // Initialize
+    $( function () {
+        var $btn = $( '#ca-gemini-translate' );
+        if ( $btn.length ) {
+            new GeminiTranslator( $btn );
+        }
+    } );
+
+}( mediaWiki, jQuery ) );
