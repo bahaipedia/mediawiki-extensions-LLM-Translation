@@ -1,141 +1,102 @@
 window.ext = window.ext || {};
 window.ext.geminiTranslator = window.ext.geminiTranslator || {};
-console.log('Gemini: Loaded v2 bootstrap.js');
+
 ( function ( mw, $ ) {
 
-    // -----------------------------------------------------------
-    // 1. Define the Custom Dialog Class
-    // -----------------------------------------------------------
     function GeminiDialog( config ) {
         GeminiDialog.super.call( this, config );
     }
     OO.inheritClass( GeminiDialog, OO.ui.ProcessDialog );
 
-    // Static configuration
     GeminiDialog.static.name = 'geminiDialog';
     GeminiDialog.static.title = 'Translate Page';
     GeminiDialog.static.actions = [
-        { action: 'translate', label: 'Translate', flags: 'primary' },
+        { action: 'go', label: 'Go', flags: 'primary' },
         { action: 'cancel', label: 'Cancel', flags: 'safe' }
     ];
 
-    // Initialize content
     GeminiDialog.prototype.initialize = function () {
         GeminiDialog.super.prototype.initialize.call( this );
-
         this.panel = new OO.ui.PanelLayout( { padded: true, expanded: false } );
-
-        this.langInput = new OO.ui.TextInputWidget( { 
-            placeholder: 'es', 
-            value: 'es' 
-        } );
-
+        this.langInput = new OO.ui.TextInputWidget( { placeholder: 'es', value: 'es' } );
         this.panel.$element.append( 
-            $( '<p>' ).text( 'Enter target language code (e.g. es, fr, de):' ),
+            $( '<p>' ).text( 'Enter target language code:' ),
             this.langInput.$element 
         );
-
         this.$body.append( this.panel.$element );
     };
 
-    // Handle the "Translate" button click
     GeminiDialog.prototype.getActionProcess = function ( action ) {
-        if ( action === 'translate' ) {
-            // Emit an event so the main controller knows to start
-            this.emit( 'translate', this.langInput.getValue() );
-            // Close the window
-            return new OO.ui.Process( function () {
-                this.close();
-            }, this );
+        if ( action === 'go' ) {
+            var lang = this.langInput.getValue();
+            var title = mw.config.get( 'wgPageName' );
+            // Redirect to Title/lang
+            window.location.href = mw.util.getUrl( title + '/' + lang );
+            return new OO.ui.Process( function () { this.close(); }, this );
         }
-        // Default behavior for cancel/close
         return GeminiDialog.super.prototype.getActionProcess.call( this, action );
     };
 
-    // -----------------------------------------------------------
-    // 2. Define the Controller
-    // -----------------------------------------------------------
-    function GeminiTranslator() {
-        this.revision = mw.config.get( 'wgRevisionId' );
-        this.$content = $( '#mw-content-text > .mw-parser-output' );
-        
-        // Setup Window Manager
-        this.windowManager = new OO.ui.WindowManager();
-        $( 'body' ).append( this.windowManager.$element );
+    $( function () {
+        // If we are ALREADY on a translation page (e.g. Title/es), load the content immediately
+        // We detect this by checking if the body has our specific class (added by PHP later)
+        if ( $( 'body' ).hasClass( 'gemini-virtual-page' ) ) {
+            var pathParts = mw.config.get('wgPageName').split('/');
+            var targetLang = pathParts.pop();
+            
+            // Initiate the stream
+            var translator = new GeminiTranslatorController();
+            translator.startStream( targetLang );
+        }
 
-        // Instantiate our custom dialog
-        this.dialog = new GeminiDialog();
-        this.windowManager.addWindows( [ this.dialog ] );
+        // Setup the Menu Click Handler
+        var windowManager = new OO.ui.WindowManager();
+        $( 'body' ).append( windowManager.$element );
+        var dialog = new GeminiDialog();
+        windowManager.addWindows( [ dialog ] );
 
-        // Connect the dialog's 'translate' event to our logic
-        this.dialog.connect( this, { translate: 'startTranslation' } );
+        $( 'body' ).on( 'click', '#ca-gemini-translate', function( e ) {
+            e.preventDefault();
+            windowManager.openWindow( dialog );
+        } );
+    } );
+
+    // The Logic to Stream Content into the Virtual Page
+    function GeminiTranslatorController() {
+        this.revision = mw.config.get( 'wgGeminiParentRevId' ); // Passed from PHP
+        this.$content = $( '#gemini-virtual-content' ); // Placeholder in PHP
     }
 
-    GeminiTranslator.prototype.open = function () {
-        this.windowManager.openWindow( this.dialog );
-    };
-
-    GeminiTranslator.prototype.startTranslation = function ( targetLang ) {
-        this.$content.css( 'opacity', '0.5' );
-        mw.notify( 'Starting translation...' );
-
+    GeminiTranslatorController.prototype.startStream = function ( targetLang ) {
         this.fetchSection( 0, targetLang ).done( ( data ) => {
             this.$content.html( data.html );
-            this.$content.css( 'opacity', '1' );
-            
-            this.$restOfPage = $( '<div>' ).attr('id', 'gemini-translated-body').appendTo( this.$content );
-
+            this.$restOfPage = $( '<div>' ).appendTo( this.$content );
             this.fetchNextSection( 1, targetLang );
-
-        } ).fail( ( err ) => {
-            console.error( err );
-            mw.notify( 'Translation failed.', { type: 'error' } );
-            this.$content.css( 'opacity', '1' );
         } );
     };
 
-    GeminiTranslator.prototype.fetchNextSection = function ( sectionId, targetLang ) {
-        var $loader = $( '<div>' ).text( 'Loading section ' + sectionId + '...' ).appendTo( this.$restOfPage );
+    GeminiTranslatorController.prototype.fetchNextSection = function ( sectionId, targetLang ) {
+        var $loader = $( '<div>' )
+            .addClass( 'gemini-loader' )
+            .text( '...Translating next section...' )
+            .appendTo( this.$restOfPage );
 
         this.fetchSection( sectionId, targetLang ).done( ( data ) => {
             $loader.remove();
-            
             if ( data.html && data.html.trim() !== '' ) {
                 $( '<div>' ).html( data.html ).appendTo( this.$restOfPage );
                 this.fetchNextSection( sectionId + 1, targetLang );
-            } else {
-                mw.notify( 'Translation complete!' );
             }
-        } ).fail( () => {
-            $loader.remove();
-        } );
+        } ).fail( () => { $loader.remove(); } );
     };
 
-    GeminiTranslator.prototype.fetchSection = function ( sectionId, targetLang ) {
+    GeminiTranslatorController.prototype.fetchSection = function ( sectionId, targetLang ) {
         return $.ajax( {
             method: 'POST',
             url: mw.util.wikiScript( 'rest' ) + '/gemini-translator/translate_section/' + this.revision,
             contentType: 'application/json',
-            data: JSON.stringify( {
-                targetLang: targetLang,
-                section: sectionId
-            } )
+            data: JSON.stringify( { targetLang: targetLang, section: sectionId } )
         } );
     };
-
-    // -----------------------------------------------------------
-    // 3. Initialize
-    // -----------------------------------------------------------
-    $( function () {
-        // Instantiate the controller once
-        var translator = new GeminiTranslator();
-        console.log('Gemini: Translator initialized');
-
-        // Event Delegation for the button
-        $( 'body' ).on( 'click', '#ca-gemini-translate', function( e ) {
-            e.preventDefault();
-            translator.open();
-        } );
-    } );
 
 }( mediaWiki, jQuery ) );
