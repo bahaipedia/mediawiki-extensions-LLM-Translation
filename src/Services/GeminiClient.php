@@ -32,8 +32,6 @@ class GeminiClient {
 		}
 
 		// Prepare the Prompt
-		// We use a structured prompt to ensure Gemini returns a JSON array of translations
-		// that maps 1:1 to the input blocks.
 		$promptParts = [];
 		$promptParts[] = "You are a professional translator for an encyclopedia. Translate the following HTML blocks into language code '{$targetLang}'.";
 		$promptParts[] = "Maintain all HTML tags, classes, and structure exactly. Only translate the human-readable text content.";
@@ -56,25 +54,27 @@ class GeminiClient {
 		$req = $this->httpFactory->create( $url, [ 'method' => 'POST' ], __METHOD__ );
 		$req->setBody( json_encode( $payload ) );
 		$req->setHeader( 'Content-Type', 'application/json' );
+		
+		// CRITICAL FIX: Send a Referer header to satisfy Google API Key "Website Restrictions"
+		// Since this runs on the server, we manually set it to a domain allowed by your key.
+		// Using the base domain allows it to work across all subdomains (es., de., etc).
+		$req->setHeader( 'Referer', '[https://bahaipedia.org/](https://bahaipedia.org/)' );
 
 		$status = $req->execute();
 
 		if ( !$status->isOK() ) {
-			return $status;
+			// Return the actual error from Google for debugging
+			return StatusValue::newFatal( 'geminitranslator-ui-error', $status->getErrors() );
 		}
 
 		$result = json_decode( $req->getContent(), true );
 		
-		// Parsing Gemini Response
-		// Note: Robust error handling needed here for real production (checking candidates, safety ratings)
 		if ( isset( $result['candidates'][0]['content']['parts'][0]['text'] ) ) {
 			$rawText = $result['candidates'][0]['content']['parts'][0]['text'];
-			// Strip possible markdown code blocks if Gemini ignores our system instruction
 			$rawText = str_replace( [ '```json', '```' ], '', $rawText );
 			$translatedBlocks = json_decode( trim( $rawText ), true );
 
 			if ( json_last_error() === JSON_ERROR_NONE && is_array( $translatedBlocks ) ) {
-				// Map back to original keys if necessary, strictly assuming order is preserved
 				return StatusValue::newGood( $translatedBlocks );
 			}
 		}
