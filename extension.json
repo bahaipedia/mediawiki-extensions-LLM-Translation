@@ -17,8 +17,14 @@
 		"MediaWiki\\Extension\\GeminiTranslator\\": "src/"
 	},
 	"config": {
-		"GeminiApiKey": "",
-		"GeminiModel": "gemini-2.5-flash"
+		"GeminiApiKey": {
+			"value": "",
+			"description": "API Key for Google Gemini"
+		},
+		"GeminiModel": {
+			"value": "gemini-2.5-flash",
+			"description": "Model version to use for translations"
+		}
 	},
 	"ResourceModules": {
 		"ext.geminitranslator.bootstrap": {
@@ -59,7 +65,7 @@
 		"path": "/gemini-translator/translate_section/{rev_id}",
 		"class": "MediaWiki\\Extension\\GeminiTranslator\\Rest\\TranslateHandler",
 		"services": [
-			"TitleFactory", "RevisionLookup", "GeminiTranslator.PageTranslator"
+			"RevisionLookup", "GeminiTranslator.PageTranslator"
 		]
 	} ],
 	"ServiceWiringFiles": [
