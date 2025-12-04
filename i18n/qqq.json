@@ -1,18 +1,15 @@
 {
 	"@metadata": {
 		"authors": [
-			"HalloWelt! GmbH"
+			"Sarah Haslip"
 		]
 	},
-	"adhoctranslation-desc": "Extension description displayed on [[Special:Version]].",
-	"adhoctranslation-source-lang-not-supported": "Error message when the source language code is not supported by the translation service.\n\nParameters:\n* $1 - Language code",
-	"adhoctranslation-target-lang-not-supported": "Error message when the target language code is not supported by the translation service.\n\nParameters:\n* $1 - Language code",
-	"adhoctranslation-target-exists": "Error message when a page already exists in the requested target language.",
-	"adhoctranslation-same-lang": "Error message when the source and target languages are the same.",
-	"adhoctranslation-ca-translate": "Label for the action link that translates the page to the user’s language.",
-	"adhoctranslation-ui-translating": "Message displayed while translation is in progress.",
-	"adhoctranslation-ui-translated": "Message displayed when the translation has been successfully loaded.",
-	"adhoctranslation-ui-error": "Message displayed when the translation request fails.",
-	"adhoctranslation-ui-original": "Link text for showing the original, untranslated page content.",
-	"adhoctranslation-not-configured": "Error message when the translation service is not configured."
+	"geminitranslator-desc": "Extension description displayed on [[Special:Version]].",
+	"geminitranslator-ca-translate": "Label for the sidebar/menu action link that triggers the translation dialog.",
+	"geminitranslator-ui-translating": "Message displayed while the translation process is running.",
+	"geminitranslator-ui-translated": "Message displayed (e.g., in a banner) after content has been translated.",
+	"geminitranslator-ui-error": "Generic error message displayed to the user if translation fails.",
+	"geminitranslator-ui-original": "Link or button text to revert the translation to the original source.",
+	"geminitranslator-error-no-api-key": "Backend error message when the extension cannot find the API key.",
+	"geminitranslator-error-bad-response": "Backend error message when the API response format is unexpected."
 }
