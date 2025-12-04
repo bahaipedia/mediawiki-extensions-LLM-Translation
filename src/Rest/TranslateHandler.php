@@ -2,6 +2,7 @@
 
 namespace MediaWiki\Extension\GeminiTranslator\Rest;
 
+use MediaWiki\Context\RequestContext;
 use MediaWiki\Extension\GeminiTranslator\PageTranslator;
 use MediaWiki\Rest\HttpException;
 use MediaWiki\Rest\SimpleHandler;
@@ -48,7 +49,6 @@ class TranslateHandler extends SimpleHandler {
 		
 		if ( $content ) {
 			error_log( "GEMINI DEBUG: Content found. Attempting to get section $sectionId" );
-			// Note: getSection can return false/null if section doesn't exist
 			$sectionBlob = $content->getSection( $sectionId );
 			if ( $sectionBlob ) {
 				$sectionContent = $sectionBlob;
@@ -69,7 +69,9 @@ class TranslateHandler extends SimpleHandler {
 		error_log( "GEMINI DEBUG: Parsing wikitext..." );
 		$services = MediaWikiServices::getInstance();
 		$parser = $services->getParser();
-		$popts = ParserOptions::newFromContext( $this->getContext() );
+		
+		// FIX: Use RequestContext::getMain() instead of $this->getContext()
+		$popts = ParserOptions::newFromContext( RequestContext::getMain() );
 		
 		$output = $parser->parse( 
 			$sectionContent->getText(), 
@@ -84,11 +86,11 @@ class TranslateHandler extends SimpleHandler {
 		// 4. Translate via Gemini Block Engine
 		error_log( "GEMINI DEBUG: Calling PageTranslator->translateHtml..." );
 		
-		// !!! THIS IS LIKELY WHERE IT CRASHES !!!
 		$status = $this->translator->translateHtml( $sourceHtml, $targetLang );
 
 		if ( !$status->isOK() ) {
 			error_log( "GEMINI DEBUG: Translation failed: " . print_r($status->getErrors(), true) );
+			// Return a clean error to the frontend
 			return $this->getResponseFactory()->createJson( [ 'error' => $status->getErrors() ], 400 );
 		}
 
