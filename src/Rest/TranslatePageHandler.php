@@ -1,34 +1,26 @@
 <?php
 
-namespace MediaWiki\Extension\AdhocTranslation\Rest;
+namespace MediaWiki\Extension\GeminiTranslator\Rest;
 
-use MediaWiki\Context\RequestContext;
-use MediaWiki\Extension\AdhocTranslation\PageTranslator;
+use MediaWiki\Extension\GeminiTranslator\PageTranslator;
 use MediaWiki\Rest\HttpException;
 use MediaWiki\Rest\SimpleHandler;
 use MediaWiki\Revision\RevisionLookup;
-use MediaWiki\Title\Title;
-use MediaWiki\Title\TitleFactory;
+use MediaWiki\Parser\Parser;
+use MediaWiki\Parser\ParserOptions;
+use MediaWiki\Parser\ParserOutput;
+use MediaWiki\MediaWikiServices;
 use Wikimedia\ParamValidator\ParamValidator;
 
-class TranslatePageHandler extends SimpleHandler {
+class TranslateHandler extends SimpleHandler {
 
-	/** @var TitleFactory */
-	private TitleFactory $titleFactory;
-	/** @var RevisionLookup */
 	private RevisionLookup $revisionLookup;
-	/** @var PageTranslator */
 	private PageTranslator $translator;
 
-	/**
-	 * @param TitleFactory $titleFactory
-	 * @param RevisionLookup $revisionLookup
-	 * @param PageTranslator $translator
-	 */
 	public function __construct(
-		TitleFactory $titleFactory, RevisionLookup $revisionLookup, PageTranslator $translator
+		RevisionLookup $revisionLookup,
+		PageTranslator $translator
 	) {
-		$this->titleFactory = $titleFactory;
 		$this->revisionLookup = $revisionLookup;
 		$this->translator = $translator;
 	}
@@ -36,43 +28,74 @@ class TranslatePageHandler extends SimpleHandler {
 	public function execute() {
 		$params = $this->getValidatedParams();
 		$body = $this->getValidatedBody();
-		$rev = $this->revisionLookup->getRevisionById( $params['rev_id'] );
+		
+		$revId = $params['rev_id'];
+		$targetLang = $body['targetLang'];
+		// Default to section 0 (Lead) if not provided
+		$sectionId = $body['section'] ?? 0;
+
+		// 1. Load Revision
+		$rev = $this->revisionLookup->getRevisionById( $revId );
 		if ( !$rev ) {
 			throw new HttpException( 'Revision not found', 404 );
 		}
-		$title = $this->titleFactory->castFromLinkTarget( $rev->getPageAsLinkTarget() );
-		if ( !$title ) {
-			throw new HttpException( 'Title not found', 404 );
+
+		// 2. Get Section Content (Wikitext)
+		// We use the content handler to slice the wikitext by section index
+		$content = $rev->getContent( 'main' );
+		$sectionContent = null;
+		
+		if ( $content ) {
+			// This is a bit of a workaround to get section-specific HTML reliably
+			// We fetch the wikitext section, then parse it.
+			// Note: This might miss context (like references defined elsewhere), 
+			// but it supports the Lazy Load architecture best.
+			$sectionBlob = $content->getSection( $sectionId );
+			if ( $sectionBlob ) {
+				$sectionContent = $sectionBlob;
+			} else {
+				// Fallback: if section extraction fails or is 0 (whole page sometimes), try getting full content
+				// For now, if section is missing, we assume end of content
+				if ( $sectionId !== 0 ) { 
+					return $this->getResponseFactory()->createJson( [ 'html' => '' ] );
+				}
+				$sectionContent = $content;
+			}
 		}
-		$text = $body['content'];
-		$status = $this->translator->getTranslationFromText( $text, $title, RequestContext::getMain()->getUser() );
+
+		if ( !$sectionContent ) {
+			throw new HttpException( 'Could not extract section content', 500 );
+		}
+
+		// 3. Parse Wikitext to HTML
+		// We need a ParserOptions object configured for the user/wiki
+		$services = MediaWikiServices::getInstance();
+		$parser = $services->getParser();
+		$popts = ParserOptions::newFromContext( $this->getContext() );
+		
+		// Render the section
+		$output = $parser->parse( 
+			$sectionContent->getText(), 
+			$rev->getPageAsLinkTarget(), 
+			$popts, 
+			true 
+		);
+		
+		$sourceHtml = $output->getText();
+
+		// 4. Translate via Gemini Block Engine
+		$status = $this->translator->translateHtml( $sourceHtml, $targetLang );
+
 		if ( !$status->isOK() ) {
 			return $this->getResponseFactory()->createJson( [ 'error' => $status->getErrors() ], 400 );
 		}
 
 		return $this->getResponseFactory()->createJson( [
-			'title' => $this->translateTitle( $title ),
-			'text' => $status->getValue()
+			'html' => $status->getValue(),
+			'section' => $sectionId
 		] );
 	}
 
-	/**
-	 * @param Title $title
-	 * @return string
-	 */
-	private function translateTitle( Title $title ): ?string {
-		$translated = $this->translator->getTranslationFromText(
-			$title->getText(), $title, RequestContext::getMain()->getUser()
-		);
-		if ( $translated->isOK() ) {
-			return $translated->getValue();
-		}
-		return null;
-	}
-
-	/**
-	 * @inheritDoc
-	 */
 	public function getParamSettings() {
 		return [
 			'rev_id' => [
@@ -83,27 +106,19 @@ class TranslatePageHandler extends SimpleHandler {
 		];
 	}
 
-	/**
-	 * @inheritDoc
-	 */
 	public function getBodyParamSettings(): array {
 		return [
-			'content' => [
+			'targetLang' => [
 				self::PARAM_SOURCE => 'body',
 				ParamValidator::PARAM_TYPE => 'string',
 				ParamValidator::PARAM_REQUIRED => true,
 			],
+			'section' => [
+				self::PARAM_SOURCE => 'body',
+				ParamValidator::PARAM_TYPE => 'integer',
+				ParamValidator::PARAM_REQUIRED => false,
+				self::PARAM_DEFAULT => 0
+			]
 		];
 	}
-
-	/**
-	 * @inheritDoc
-	 */
-	public function getSupportedRequestTypes(): array {
-		return [
-			'application/x-www-form-urlencoded',
-			'multipart/form-data',
-		];
-	}
-
 }
