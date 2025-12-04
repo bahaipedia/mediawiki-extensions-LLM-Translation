@@ -49,6 +49,10 @@
 	"Hooks": {
 		"BeforePageDisplay": "addContentAction",
 		"LoadExtensionSchemaUpdates": "onLoadExtensionSchemaUpdates"
+		"onBeforeInitialize": {
+			"class": "MediaWiki\\Extension\\GeminiTranslator\\Hook\\VirtualPageDisplay",
+			"services": [ "RevisionLookup", "TitleFactory" ]
+		}
 	},
 	"HookHandlers": {
 		"addContentAction": {
