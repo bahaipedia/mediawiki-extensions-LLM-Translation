@@ -127,6 +127,78 @@ class PageTranslator {
 	}
 
 	/**
+	 * Translates an array of raw strings using DB cache + API
+	 * @param array $strings List of strings to translate
+	 * @param string $targetLang
+	 * @return array Map of [ original_string => translated_string ]
+	 */
+	public function translateStrings( array $strings, string $targetLang ): array {
+		if ( empty( $strings ) ) {
+			return [];
+		}
+
+		$hashes = [];
+		$mapHashToContent = [];
+
+		foreach ( $strings as $text ) {
+			$hash = hash( 'sha256', trim( $text ) );
+			$hashes[] = $hash;
+			$mapHashToContent[$hash] = $text;
+		}
+
+		// 1. Check DB
+		$cached = $this->fetchFromDb( array_unique( $hashes ), $targetLang );
+
+		// 2. Identify Misses
+		$missingHashes = [];
+		$toTranslate = [];
+		
+		foreach ( $mapHashToContent as $hash => $text ) {
+			if ( !isset( $cached[$hash] ) ) {
+				$missingHashes[] = $hash;
+				// Avoid sending duplicates to API
+				if ( !isset( $toTranslate[$hash] ) ) {
+					$toTranslate[$hash] = $text;
+				}
+			}
+		}
+
+		// 3. Call API for misses
+		if ( !empty( $toTranslate ) ) {
+			// Values only
+			$apiInput = array_values( $toTranslate );
+			$apiStatus = $this->client->translateBlocks( $apiInput, $targetLang );
+
+			if ( $apiStatus->isOK() ) {
+				$results = $apiStatus->getValue();
+				// Map API results (indexed) back to Hashes (keys of toTranslate)
+				$keys = array_keys( $toTranslate );
+				$newRows = [];
+
+				foreach ( $results as $i => $translatedText ) {
+					if ( isset( $keys[$i] ) ) {
+						$h = $keys[$i];
+						$cached[$h] = $translatedText; // Update our local result set
+						$newRows[$h] = $translatedText;
+					}
+				}
+				// Save to DB
+				$this->saveToDb( $newRows, $targetLang );
+			}
+		}
+
+		// 4. Build Result Map
+		$finalResults = [];
+		foreach ( $strings as $text ) {
+			$h = hash( 'sha256', trim( $text ) );
+			// If translation failed or missing, fallback to original
+			$finalResults[$text] = $cached[$h] ?? $text;
+		}
+
+		return $finalResults;
+	}
+
+	/**
 	 * Helper to get inner HTML of a DOMNode
 	 */
 	private function getInnerHtml( DOMElement $element ): string {
