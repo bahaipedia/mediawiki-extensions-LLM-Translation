@@ -61,7 +61,7 @@
 		},
 		"onLoadExtensionSchemaUpdates": {
 			"class": "MediaWiki\\Extension\\GeminiTranslator\\Hook\\SchemaUpdates"
-		}
+		},
 	},
 	"RestRoutes": [ {
 		"method": "POST",
