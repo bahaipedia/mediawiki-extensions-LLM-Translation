@@ -2,6 +2,7 @@
 
 use MediaWiki\Extension\GeminiTranslator\PageTranslator;
 use MediaWiki\Extension\GeminiTranslator\Services\GeminiClient;
+use MediaWiki\Extension\GeminiTranslator\Services\SkeletonBuilder;
 use MediaWiki\MediaWikiServices;
 
 return [
@@ -20,5 +21,10 @@ return [
 			$services->getDBLoadBalancer(),
 			$services->getMainConfig()
 		);
+	},
+
+	// NEW SERVICE
+	'GeminiTranslator.SkeletonBuilder' => static function ( MediaWikiServices $services ) {
+		return new SkeletonBuilder();
 	},
 ];
