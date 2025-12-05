@@ -77,6 +77,7 @@ class VirtualPageDisplay implements BeforeInitializeHook {
 		$output->setArticleFlag( false ); 
 		$output->addBodyClasses( 'gemini-virtual-page' );
 		$output->addModules( [ 'ext.geminitranslator.bootstrap' ] );
+		$output->addInlineStyle( '.noarticletext { display: none !important; }' );
 
 		// 1. Get Parent Revision
 		$rev = $this->revisionLookup->getRevisionByTitle( $parent );
