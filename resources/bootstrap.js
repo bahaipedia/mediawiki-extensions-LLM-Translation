@@ -1,9 +1,24 @@
 window.ext = window.ext || {};
 window.ext.geminiTranslator = window.ext.geminiTranslator || {};
-console.log('Gemini: Loaded v5 bootstrap.js');
+console.log('Gemini: Loaded v6 bootstrap.js');
 ( function ( mw, $ ) {
 
-    // --- Dialog Logic (Redirects to /lang) ---
+    // --- Helper: Correctly decode UTF-8 from Base64 ---
+    function decodeBase64Utf8( base64 ) {
+        try {
+            var binaryString = atob( base64 );
+            var bytes = new Uint8Array( binaryString.length );
+            for ( var i = 0; i < binaryString.length; i++ ) {
+                bytes[i] = binaryString.charCodeAt( i );
+            }
+            return new TextDecoder( 'utf-8' ).decode( bytes );
+        } catch ( e ) {
+            console.error( 'Gemini: Failed to decode base64 token', e );
+            return '';
+        }
+    }
+
+    // --- Dialog Logic ---
     function GeminiDialog( config ) {
         GeminiDialog.super.call( this, config );
     }
@@ -34,47 +49,57 @@ console.log('Gemini: Loaded v5 bootstrap.js');
     // --- Token Processor Logic ---
     function processTokens() {
         var $tokens = $( '.gemini-token' );
-        if ( !$tokens.length ) return;
+        if ( !$tokens.length ) {
+            console.log( 'Gemini: No tokens found on page.' );
+            return;
+        }
 
         var targetLang = mw.config.get( 'wgGeminiTargetLang' );
-        if ( !targetLang ) return;
+        if ( !targetLang ) {
+            console.warn( 'Gemini: Tokens found but no target language defined.' );
+            return;
+        }
 
-        console.log( 'Gemini: Found ' + $tokens.length + ' tokens. Processing...' );
+        console.log( 'Gemini: Found ' + $tokens.length + ' tokens. Preparing batch...' );
 
         // 1. Collect strings and map them to DOM elements
         var batch = [];
-        var elementMap = new Map(); // string -> [jquery_elements]
+        var elementMap = new Map();
 
         $tokens.each( function() {
             var $el = $( this );
-            // Decode the base64 source
-            try {
-                var raw = atob( $el.data( 'source' ) );
+            var raw = decodeBase64Utf8( $el.data( 'source' ) );
+            
+            if ( raw ) {
                 if ( !elementMap.has( raw ) ) {
                     elementMap.set( raw, [] );
                     batch.push( raw );
                 }
                 elementMap.get( raw ).push( $el );
-            } catch (e) {
-                console.error('Gemini: Bad token', e);
             }
         });
 
-        // 2. Chunk into groups of 25 to respect API limits
+        console.log( 'Gemini: Unique strings to translate: ' + batch.length );
+
+        // 2. Chunk into groups of 25
         var chunkSize = 25;
         for ( var i = 0; i < batch.length; i += chunkSize ) {
             var chunk = batch.slice( i, i + chunkSize );
+            console.log( 'Gemini: Queueing batch ' + (i/chunkSize + 1) + ' (' + chunk.length + ' items)' );
             fetchBatch( chunk, targetLang, elementMap );
         }
     }
 
     function fetchBatch( strings, targetLang, elementMap ) {
+        console.log( 'Gemini: Sending batch request...' );
+        
         $.ajax( {
             method: 'POST',
             url: mw.util.wikiScript( 'rest' ) + '/gemini-translator/translate_batch',
             contentType: 'application/json',
             data: JSON.stringify( { strings: strings, targetLang: targetLang } )
         } ).done( function( data ) {
+            console.log( 'Gemini: Received response for ' + Object.keys(data.translations).length + ' strings.' );
             applyTranslations( data.translations, elementMap );
         }).fail( function( err ) {
             console.error( 'Gemini: Batch failed', err );
@@ -86,9 +111,9 @@ console.log('Gemini: Loaded v5 bootstrap.js');
             var $elements = elementMap.get( original );
             if ( $elements ) {
                 $elements.forEach( function( $el ) {
-                    // Fade out spinner, swap text, fade in
+                    // Visual transition
                     $el.css( 'opacity', 0 ).animate( { opacity: 1 }, 300, function() {
-                        // Replace the SPAN with a pure TextNode to clean up the DOM
+                        // Replace the token SPAN with a standard Text Node
                         $el.replaceWith( document.createTextNode( translated ) );
                     });
                 });
@@ -110,10 +135,7 @@ console.log('Gemini: Loaded v5 bootstrap.js');
 
         // 2. Virtual Page Handler
         if ( $( 'body' ).hasClass( 'gemini-virtual-page' ) ) {
-            // Hide the "No article text" box via JS as well just in case
             $( '.noarticletext' ).hide();
-            
-            // Start processing tokens immediately
             processTokens();
         }
     } );
