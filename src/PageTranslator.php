@@ -133,6 +133,8 @@ class PageTranslator {
 	 * @return array Map of [ original_string => translated_string ]
 	 */
 	public function translateStrings( array $strings, string $targetLang ): array {
+		error_log("GEMINI CRASH TRACE: 4. Inside translateStrings");
+		
 		if ( empty( $strings ) ) {
 			return [];
 		}
@@ -146,52 +148,50 @@ class PageTranslator {
 			$mapHashToContent[$hash] = $text;
 		}
 
+		error_log("GEMINI CRASH TRACE: 5. Hashes calculated");
+
 		// 1. Check DB
 		$cached = $this->fetchFromDb( array_unique( $hashes ), $targetLang );
 
 		// 2. Identify Misses
-		$missingHashes = [];
 		$toTranslate = [];
-		
 		foreach ( $mapHashToContent as $hash => $text ) {
 			if ( !isset( $cached[$hash] ) ) {
-				$missingHashes[] = $hash;
-				// Avoid sending duplicates to API
 				if ( !isset( $toTranslate[$hash] ) ) {
 					$toTranslate[$hash] = $text;
 				}
 			}
 		}
 
+		error_log("GEMINI CRASH TRACE: 6. Cache checked. Missing count: " . count($toTranslate));
+
 		// 3. Call API for misses
 		if ( !empty( $toTranslate ) ) {
-			// Values only
 			$apiInput = array_values( $toTranslate );
+			
+			error_log("GEMINI CRASH TRACE: 7. Calling Client->translateBlocks...");
 			$apiStatus = $this->client->translateBlocks( $apiInput, $targetLang );
+			error_log("GEMINI CRASH TRACE: 7b. Client returned."); // If we don't see this, Client crashed
 
 			if ( $apiStatus->isOK() ) {
 				$results = $apiStatus->getValue();
-				// Map API results (indexed) back to Hashes (keys of toTranslate)
 				$keys = array_keys( $toTranslate );
 				$newRows = [];
 
 				foreach ( $results as $i => $translatedText ) {
 					if ( isset( $keys[$i] ) ) {
 						$h = $keys[$i];
-						$cached[$h] = $translatedText; // Update our local result set
+						$cached[$h] = $translatedText;
 						$newRows[$h] = $translatedText;
 					}
 				}
-				// Save to DB
 				$this->saveToDb( $newRows, $targetLang );
 			}
 		}
 
-		// 4. Build Result Map
 		$finalResults = [];
 		foreach ( $strings as $text ) {
 			$h = hash( 'sha256', trim( $text ) );
-			// If translation failed or missing, fallback to original
 			$finalResults[$text] = $cached[$h] ?? $text;
 		}
 
