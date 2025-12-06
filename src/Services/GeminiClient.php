@@ -9,11 +9,13 @@ class GeminiClient {
 	private string $apiKey;
 	private string $model;
 	private HttpRequestFactory $httpFactory;
+	private string $serverUrl;
 
-	public function __construct( string $apiKey, string $model, HttpRequestFactory $httpFactory ) {
+	public function __construct( string $apiKey, string $model, HttpRequestFactory $httpFactory, string $serverUrl ) {
 		$this->apiKey = $apiKey;
 		$this->model = $model;
 		$this->httpFactory = $httpFactory;
+		$this->serverUrl = $serverUrl;
 	}
 
 	public function translateBlocks( array $blocks, string $targetLang ): StatusValue {
@@ -26,7 +28,6 @@ class GeminiClient {
 			return StatusValue::newGood( [] );
 		}
 
-		// LOGGING
 		error_log("GEMINI CLIENT: Sending " . count($blocks) . " blocks to translate into '$targetLang'.");
 
 		$promptParts = [];
@@ -47,7 +48,10 @@ class GeminiClient {
 		$req = $this->httpFactory->create( $url, [ 'method' => 'POST', 'postData' => json_encode( $payload ) ], __METHOD__ );
 		
 		$req->setHeader( 'Content-Type', 'application/json' );
-		$req->setHeader( 'Referer', 'https://bahaipedia.org/' );
+		
+		// DYNAMIC REFERER: Uses the actual wiki URL (e.g., https://vi.bahaipedia.org)
+		// This ensures it matches the *.bahaipedia.org restriction.
+		$req->setHeader( 'Referer', $this->serverUrl . '/' );
 
 		$status = $req->execute();
 
@@ -58,7 +62,6 @@ class GeminiClient {
 
 		$result = json_decode( $req->getContent(), true );
 		
-		// Check for API errors (like 400/403 inside the JSON)
 		if ( isset( $result['error'] ) ) {
 			error_log("GEMINI CLIENT: API Error: " . print_r($result['error'], true));
 			return StatusValue::newFatal( 'geminitranslator-ui-error' );
@@ -73,10 +76,10 @@ class GeminiClient {
 				error_log("GEMINI CLIENT: Success! Received " . count($translatedBlocks) . " strings.");
 				return StatusValue::newGood( $translatedBlocks );
 			} else {
-				error_log("GEMINI CLIENT: JSON Decode Error on response: " . substr($rawText, 0, 100) . "...");
+				error_log("GEMINI CLIENT: JSON Decode Error: " . substr($rawText, 0, 100) . "...");
 			}
 		} else {
-			error_log("GEMINI CLIENT: Unexpected response structure: " . substr($req->getContent(), 0, 200));
+			error_log("GEMINI CLIENT: Unexpected response structure.");
 		}
 
 		return StatusValue::newFatal( 'geminitranslator-error-bad-response' );
