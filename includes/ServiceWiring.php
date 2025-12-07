@@ -25,6 +25,8 @@ return [
 	},
 
 	'GeminiTranslator.SkeletonBuilder' => static function ( MediaWikiServices $services ) {
-		return new SkeletonBuilder();
+		return new SkeletonBuilder(
+			$services->getService( 'GeminiTranslator.PageTranslator' )
+		);
 	},
 ];
