@@ -111,11 +111,8 @@ console.log('Gemini: Loaded v8 bootstrap.js');
             var $elements = elementMap.get( original );
             if ( $elements ) {
                 $elements.forEach( function( $el ) {
-                    // Visual transition
-                    $el.css( 'opacity', 0 ).animate( { opacity: 1 }, 300, function() {
-                        // Replace the token SPAN with a standard Text Node
-                        $el.replaceWith( document.createTextNode( translated ) );
-                    });
+                    // Replace immediately
+                    $el.replaceWith( document.createTextNode( translated ) );
                 });
             }
         });
