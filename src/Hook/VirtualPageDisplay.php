@@ -87,24 +87,22 @@ class VirtualPageDisplay implements BeforeInitializeHook {
 		}
 		error_log( "GEMINI HOOK: Parent Rev ID: " . $rev->getId() );
 
-		// 2. Parse Lead Section (Section 0)
+		// 2. Parse Full Content
+		// We use 'main' slot which contains the whole page wikitext
 		$content = $rev->getContent( 'main' );
-		$section0 = $content ? $content->getSection( 0 ) : null;
 		
 		$skeletonHtml = '';
-		if ( $section0 ) {
-			error_log( "GEMINI HOOK: Parsing Section 0..." );
+		if ( $content ) {
 			$services = MediaWikiServices::getInstance();
 			$parser = $services->getParser();
 			$popts = ParserOptions::newFromContext( RequestContext::getMain() );
 			
-			$parseOut = $parser->parse( $section0->getText(), $parent, $popts, true );
+			// PARSE FULL PAGE
+			$parseOut = $parser->parse( $content->getText(), $parent, $popts, true );
 			
+			// Transform to Skeleton (passing language code for cache lookup)
 			$builder = $services->getService( 'GeminiTranslator.SkeletonBuilder' );
-			$skeletonHtml = $builder->createSkeleton( $parseOut->getText() );
-			error_log( "GEMINI HOOK: Skeleton HTML length: " . strlen($skeletonHtml) );
-		} else {
-			error_log( "GEMINI HOOK: Section 0 not found" );
+			$skeletonHtml = $builder->createSkeleton( $parseOut->getText(), $lang );
 		}
 
 		// 3. Output HTML
