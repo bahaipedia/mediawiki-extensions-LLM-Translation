@@ -147,7 +147,7 @@ console.log('Gemini: Loaded v13 bootstrap.js');
                         'border': '1px solid red',
                         'cursor': 'help'
                     } );
-                    $el.attr( 'title', 'Translation failed.' );
+                    $el.attr( 'title', mw.msg( 'geminitranslator-ui-error' ) );
                 });
             }
         });
