@@ -15,6 +15,13 @@ class BatchTranslateHandler extends SimpleHandler {
 	}
 
 	public function execute() {
+		$user = $this->getAuthority()->getUser();
+		if ( !$user->isNamed() ) {
+			return $this->getResponseFactory()->createJson( [
+				'error' => 'Login required to trigger new translations.'
+			], 403 );
+		}
+
 		$body = $this->getValidatedBody();
 		$strings = $body['strings'] ?? [];
 		$targetLang = $body['targetLang'];
