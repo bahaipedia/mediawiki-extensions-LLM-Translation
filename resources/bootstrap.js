@@ -1,6 +1,6 @@
 window.ext = window.ext || {};
 window.ext.geminiTranslator = window.ext.geminiTranslator || {};
-console.log('Gemini: Loaded v9 bootstrap.js');
+console.log('Gemini: Loaded v10 bootstrap.js');
 ( function ( mw, $ ) {
 
     // --- Helper: Correctly decode UTF-8 from Base64 ---
@@ -49,27 +49,19 @@ console.log('Gemini: Loaded v9 bootstrap.js');
     // --- Token Processor Logic ---
     function processTokens() {
         var $tokens = $( '.gemini-token' );
-        if ( !$tokens.length ) {
-            console.log( 'Gemini: No tokens found on page.' );
-            return;
-        }
+        if ( !$tokens.length ) return;
 
         var targetLang = mw.config.get( 'wgGeminiTargetLang' );
-        if ( !targetLang ) {
-            console.warn( 'Gemini: Tokens found but no target language defined.' );
-            return;
-        }
+        if ( !targetLang ) return;
 
         console.log( 'Gemini: Found ' + $tokens.length + ' tokens. Preparing batch...' );
 
-        // 1. Collect strings and map them to DOM elements
         var batch = [];
         var elementMap = new Map();
 
         $tokens.each( function() {
             var $el = $( this );
             var raw = decodeBase64Utf8( $el.data( 'source' ) );
-            
             if ( raw ) {
                 if ( !elementMap.has( raw ) ) {
                     elementMap.set( raw, [] );
@@ -79,30 +71,48 @@ console.log('Gemini: Loaded v9 bootstrap.js');
             }
         });
 
-        console.log( 'Gemini: Unique strings to translate: ' + batch.length );
-
-        // 2. Chunk into groups of 25
-        var chunkSize = 25;
+        // Use small chunks to allow progressive loading
+        var chunkSize = 5;
         for ( var i = 0; i < batch.length; i += chunkSize ) {
             var chunk = batch.slice( i, i + chunkSize );
-            console.log( 'Gemini: Queueing batch ' + (i/chunkSize + 1) + ' (' + chunk.length + ' items)' );
-            fetchBatch( chunk, targetLang, elementMap );
+            // Stagger initial requests slightly to avoid hitting rate limits instantly
+            (function(c, delay) {
+                setTimeout(function() {
+                    fetchBatchWithRetry( c, targetLang, elementMap, 0 );
+                }, delay);
+            })(chunk, i * 100); 
         }
     }
 
-    function fetchBatch( strings, targetLang, elementMap ) {
-        console.log( 'Gemini: Sending batch request...' );
-        
+    /**
+     * Fetches a batch with retry logic
+     * @param {Array} strings 
+     * @param {string} targetLang 
+     * @param {Map} elementMap 
+     * @param {number} attempt (0-indexed)
+     */
+    function fetchBatchWithRetry( strings, targetLang, elementMap, attempt ) {
         $.ajax( {
             method: 'POST',
             url: mw.util.wikiScript( 'rest' ) + '/gemini-translator/translate_batch',
             contentType: 'application/json',
             data: JSON.stringify( { strings: strings, targetLang: targetLang } )
         } ).done( function( data ) {
-            console.log( 'Gemini: Received response for ' + Object.keys(data.translations).length + ' strings.' );
             applyTranslations( data.translations, elementMap );
-        }).fail( function( err ) {
-            console.error( 'Gemini: Batch failed', err );
+        }).fail( function( xhr ) {
+            console.warn( 'Gemini: Batch failed (Attempt ' + (attempt+1) + '). Status: ' + xhr.status );
+
+            // Retry up to 3 times (total 4 attempts)
+            if ( attempt < 3 ) {
+                // Exponential backoff: 2s, 4s, 8s
+                var delay = Math.pow( 2, attempt + 1 ) * 1000;
+                setTimeout( function() {
+                    fetchBatchWithRetry( strings, targetLang, elementMap, attempt + 1 );
+                }, delay );
+            } else {
+                // Final Failure: Show error state
+                markAsError( strings, elementMap );
+            }
         });
     }
 
@@ -111,8 +121,26 @@ console.log('Gemini: Loaded v9 bootstrap.js');
             var $elements = elementMap.get( original );
             if ( $elements ) {
                 $elements.forEach( function( $el ) {
-                    // Replace immediately
                     $el.replaceWith( document.createTextNode( translated ) );
+                });
+            }
+        });
+    }
+
+    function markAsError( strings, elementMap ) {
+        strings.forEach( function( str ) {
+            var $elements = elementMap.get( str );
+            if ( $elements ) {
+                $elements.forEach( function( $el ) {
+                    // Stop animation and turn red to indicate failure
+                    $el.css( {
+                        'animation': 'none',
+                        'background': '#ffdddd', // Light red background
+                        'border': '1px solid red',
+                        'cursor': 'help',
+                        'color': 'red' // Make text red? Or keep transparent?
+                    } );
+                    $el.attr( 'title', 'Translation failed. Refresh to retry.' );
                 });
             }
         });
@@ -120,7 +148,6 @@ console.log('Gemini: Loaded v9 bootstrap.js');
 
     // --- Initialization ---
     $( function () {
-        // 1. Menu Handler
         var windowManager = new OO.ui.WindowManager();
         $( 'body' ).append( windowManager.$element );
         var dialog = new GeminiDialog();
@@ -130,7 +157,6 @@ console.log('Gemini: Loaded v9 bootstrap.js');
             windowManager.openWindow( dialog );
         } );
 
-        // 2. Virtual Page Handler
         if ( $( 'body' ).hasClass( 'gemini-virtual-page' ) ) {
             $( '.noarticletext' ).hide();
             processTokens();
