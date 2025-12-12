@@ -34,7 +34,10 @@ class GeminiClient {
 		}
 		$referer = rtrim( $referer, '/' ) . '/';
 
-		// 2. Prepare Payload
+		// 2. Logging
+		error_log( sprintf( "GEMINI CLIENT: Requesting %d blocks for %s. Referer: %s", count($blocks), $targetLang, $referer ) );
+
+		// 3. Prepare Payload
 		$promptParts = [];
 		$promptParts[] = "You are a professional translator. Translate the following array of text strings into language code '{$targetLang}'.";
 		$promptParts[] = "Do not translate proper nouns or technical terms if inappropriate.";
@@ -52,7 +55,6 @@ class GeminiClient {
 
 		$jsonBody = json_encode( $payloadData, JSON_UNESCAPED_UNICODE );
 
-		// Increase timeout to 120 seconds to prevent 503 errors on large batches
 		$req = $this->httpFactory->create( $url, [ 
 			'method' => 'POST', 
 			'postData' => $jsonBody,
@@ -65,14 +67,15 @@ class GeminiClient {
 		$status = $req->execute();
 
 		if ( !$status->isOK() ) {
-			error_log( "GEMINI CLIENT: HTTP Error " . ($status->getErrors()[0]['message'] ?? 'Unknown') );
+			$msg = $status->getErrors()[0]['message'] ?? 'Unknown';
+			error_log( "GEMINI CLIENT ERROR: HTTP $msg" );
 			return StatusValue::newFatal( 'geminitranslator-ui-error', $status->getErrors() );
 		}
 
 		$result = json_decode( $req->getContent(), true );
 		
 		if ( isset( $result['error'] ) ) {
-			error_log( "GEMINI CLIENT: API Error: " . print_r( $result['error'], true ) );
+			error_log( "GEMINI CLIENT ERROR: API " . print_r( $result['error'], true ) );
 			return StatusValue::newFatal( 'geminitranslator-ui-error' );
 		}
 		
@@ -84,7 +87,7 @@ class GeminiClient {
 			if ( json_last_error() === JSON_ERROR_NONE && is_array( $translatedBlocks ) ) {
 				return StatusValue::newGood( $translatedBlocks );
 			} else {
-				error_log( "GEMINI CLIENT: JSON Decode Error: " . substr( $rawText, 0, 100 ) );
+				error_log( "GEMINI CLIENT ERROR: Bad JSON. Raw: " . substr( $rawText, 0, 50 ) );
 			}
 		}
 
