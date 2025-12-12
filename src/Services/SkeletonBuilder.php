@@ -45,18 +45,9 @@ class SkeletonBuilder {
 			$rSpace = $item['rSpace'];
 
 			if ( isset( $cached[$text] ) ) {
-				// HIT: Always show cached translation
 				$this->replaceWithText( $dom, $node, $lSpace, $cached[$text], $rSpace );
 			} else {
-				// MISS: Check Permissions
-				if ( $isReadOnly ) {
-					// ANON: Do NOT create a token. Just show English.
-					// We do nothing (node remains English), or we could wrap it in a span to indicate it's untranslated.
-					// For now, leaving it plain English is the cleanest reading experience.
-				} else {
-					// USER: Create Shimmer Token to trigger API
-					$this->replaceWithToken( $dom, $node, $lSpace, $text, $rSpace );
-				}
+				$this->replaceWithToken( $dom, $node, $lSpace, $text, $rSpace );
 			}
 		}
 
