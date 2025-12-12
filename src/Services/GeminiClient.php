@@ -35,9 +35,9 @@ class GeminiClient {
 		$referer = rtrim( $referer, '/' ) . '/';
 
 		// 2. Logging
+		/*
 		$totalChars = 0;
 		foreach( $blocks as $b ) { $totalChars += strlen($b); }
-		
 		wfDebugLog( 'GeminiTranslator', sprintf(
 			"API-REQ: Lang=%s | Blocks=%d | ApproxChars=%d | Referer=%s",
 			$targetLang,
@@ -45,6 +45,7 @@ class GeminiClient {
 			$totalChars,
 			$referer
 		));
+		*/
 
 		// 3. Prepare Payload
 		$promptParts = [];
