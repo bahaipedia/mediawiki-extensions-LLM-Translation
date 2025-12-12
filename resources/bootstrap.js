@@ -1,6 +1,6 @@
 window.ext = window.ext || {};
 window.ext.geminiTranslator = window.ext.geminiTranslator || {};
-console.log('Gemini: Loaded v10 bootstrap.js');
+
 ( function ( mw, $ ) {
 
     // --- Helper: Correctly decode UTF-8 from Base64 ---
@@ -46,77 +46,85 @@ console.log('Gemini: Loaded v10 bootstrap.js');
         return GeminiDialog.super.prototype.getActionProcess.call( this, action );
     };
 
-    // --- Token Processor Logic ---
+    // --- Serial Queue Logic ---
+    var batchQueue = [];
+    var isProcessing = false;
+    var targetLang = '';
+    var elementMap = new Map();
+
     function processTokens() {
         var $tokens = $( '.gemini-token' );
         if ( !$tokens.length ) return;
 
-        var targetLang = mw.config.get( 'wgGeminiTargetLang' );
+        targetLang = mw.config.get( 'wgGeminiTargetLang' );
         if ( !targetLang ) return;
 
-        console.log( 'Gemini: Found ' + $tokens.length + ' tokens. Preparing batch...' );
+        console.log( 'Gemini: Found ' + $tokens.length + ' tokens. Preparing queue...' );
 
-        var batch = [];
-        var elementMap = new Map();
-
+        var uniqueStrings = [];
+        
         $tokens.each( function() {
             var $el = $( this );
             var raw = decodeBase64Utf8( $el.data( 'source' ) );
             if ( raw ) {
                 if ( !elementMap.has( raw ) ) {
                     elementMap.set( raw, [] );
-                    batch.push( raw );
+                    uniqueStrings.push( raw );
                 }
                 elementMap.get( raw ).push( $el );
             }
         });
 
-        // Use small chunks to allow progressive loading
+        // Split into batches of 5 strings
         var chunkSize = 5;
-        for ( var i = 0; i < batch.length; i += chunkSize ) {
-            var chunk = batch.slice( i, i + chunkSize );
-            // Stagger initial requests slightly to avoid hitting rate limits instantly
-            (function(c, delay) {
-                setTimeout(function() {
-                    fetchBatchWithRetry( c, targetLang, elementMap, 0 );
-                }, delay);
-            })(chunk, i * 100); 
+        for ( var i = 0; i < uniqueStrings.length; i += chunkSize ) {
+            batchQueue.push( uniqueStrings.slice( i, i + chunkSize ) );
         }
+
+        console.log( 'Gemini: Queue length is ' + batchQueue.length );
+        
+        // Start the queue
+        processNextBatch();
     }
 
-    /**
-     * Fetches a batch with retry logic
-     * @param {Array} strings 
-     * @param {string} targetLang 
-     * @param {Map} elementMap 
-     * @param {number} attempt (0-indexed)
-     */
-    function fetchBatchWithRetry( strings, targetLang, elementMap, attempt ) {
+    function processNextBatch() {
+        if ( batchQueue.length === 0 ) {
+            console.log( 'Gemini: Translation complete.' );
+            return;
+        }
+
+        var currentBatch = batchQueue.shift(); // Get first item
+        var remaining = batchQueue.length;
+
         $.ajax( {
             method: 'POST',
             url: mw.util.wikiScript( 'rest' ) + '/gemini-translator/translate_batch',
             contentType: 'application/json',
-            data: JSON.stringify( { strings: strings, targetLang: targetLang } )
+            data: JSON.stringify( { strings: currentBatch, targetLang: targetLang } )
         } ).done( function( data ) {
-            applyTranslations( data.translations, elementMap );
-        }).fail( function( xhr ) {
-            console.warn( 'Gemini: Batch failed (Attempt ' + (attempt+1) + '). Status: ' + xhr.status );
-
-            // Retry up to 3 times (total 4 attempts)
-            if ( attempt < 3 ) {
-                // Exponential backoff: 2s, 4s, 8s
-                var delay = Math.pow( 2, attempt + 1 ) * 1000;
-                setTimeout( function() {
-                    fetchBatchWithRetry( strings, targetLang, elementMap, attempt + 1 );
-                }, delay );
-            } else {
-                // Final Failure: Show error state
-                markAsError( strings, elementMap );
+            // 1. Success! Update UI
+            applyTranslations( data.translations );
+            
+            // 2. Wait a small delay (500ms) to be nice to the API, then process next
+            if ( remaining > 0 ) {
+                setTimeout( processNextBatch, 500 );
             }
+        }).fail( function( xhr ) {
+            // 3. Failure! Stop the entire queue.
+            console.error( 'Gemini: Batch failed. Stopping queue to save quota.' );
+            
+            // Mark the failed batch as error
+            markAsError( currentBatch );
+            
+            // Mark all remaining queued items as error (since we aren't sending them)
+            batchQueue.forEach( function( batch ) {
+                markAsError( batch );
+            });
+            batchQueue = []; // Clear queue
         });
     }
 
-    function applyTranslations( translations, elementMap ) {
+    function applyTranslations( translations ) {
         $.each( translations, function( original, translated ) {
             var $elements = elementMap.get( original );
             if ( $elements ) {
@@ -127,20 +135,18 @@ console.log('Gemini: Loaded v10 bootstrap.js');
         });
     }
 
-    function markAsError( strings, elementMap ) {
+    function markAsError( strings ) {
         strings.forEach( function( str ) {
             var $elements = elementMap.get( str );
             if ( $elements ) {
                 $elements.forEach( function( $el ) {
-                    // Stop animation and turn red to indicate failure
                     $el.css( {
                         'animation': 'none',
-                        'background': '#ffdddd', // Light red background
+                        'background': '#ffdddd', 
                         'border': '1px solid red',
-                        'cursor': 'help',
-                        'color': 'red' // Make text red? Or keep transparent?
+                        'cursor': 'help'
                     } );
-                    $el.attr( 'title', 'Translation failed. Refresh to retry.' );
+                    $el.attr( 'title', 'Translation failed or aborted.' );
                 });
             }
         });
