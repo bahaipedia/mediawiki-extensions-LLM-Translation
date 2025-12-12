@@ -1,6 +1,6 @@
 window.ext = window.ext || {};
 window.ext.geminiTranslator = window.ext.geminiTranslator || {};
-console.log('Gemini: Loaded v11 bootstrap.js');
+console.log('Gemini: Loaded v12 bootstrap.js');
 ( function ( mw, $ ) {
 
     // --- Helper: Correctly decode UTF-8 from Base64 ---
@@ -46,73 +46,107 @@ console.log('Gemini: Loaded v11 bootstrap.js');
         return GeminiDialog.super.prototype.getActionProcess.call( this, action );
     };
 
-    // --- Token Processor Logic ---
+    // --- Serial Queue Logic ---
+    var batchQueue = [];
+    var isProcessing = false;
+    var targetLang = '';
+    var elementMap = new Map();
+
     function processTokens() {
         var $tokens = $( '.gemini-token' );
-        if ( !$tokens.length ) {
-            console.log( 'Gemini: No tokens found on page.' );
-            return;
-        }
+        if ( !$tokens.length ) return;
 
-        var targetLang = mw.config.get( 'wgGeminiTargetLang' );
-        if ( !targetLang ) {
-            console.warn( 'Gemini: Tokens found but no target language defined.' );
-            return;
-        }
+        targetLang = mw.config.get( 'wgGeminiTargetLang' );
+        if ( !targetLang ) return;
 
-        console.log( 'Gemini: Found ' + $tokens.length + ' tokens. Preparing batch...' );
+        console.log( 'Gemini: Found ' + $tokens.length + ' tokens. Preparing queue...' );
 
-        // 1. Collect strings and map them to DOM elements
-        var batch = [];
-        var elementMap = new Map();
-
+        var uniqueStrings = [];
+        
         $tokens.each( function() {
             var $el = $( this );
             var raw = decodeBase64Utf8( $el.data( 'source' ) );
-            
             if ( raw ) {
                 if ( !elementMap.has( raw ) ) {
                     elementMap.set( raw, [] );
-                    batch.push( raw );
+                    uniqueStrings.push( raw );
                 }
                 elementMap.get( raw ).push( $el );
             }
         });
 
-        console.log( 'Gemini: Unique strings to translate: ' + batch.length );
-
-        // 2. Chunk into groups of 25
-        var chunkSize = 25;
-        for ( var i = 0; i < batch.length; i += chunkSize ) {
-            var chunk = batch.slice( i, i + chunkSize );
-            console.log( 'Gemini: Queueing batch ' + (i/chunkSize + 1) + ' (' + chunk.length + ' items)' );
-            fetchBatch( chunk, targetLang, elementMap );
+        // Split into batches of 5 strings
+        var chunkSize = 5;
+        for ( var i = 0; i < uniqueStrings.length; i += chunkSize ) {
+            batchQueue.push( uniqueStrings.slice( i, i + chunkSize ) );
         }
+
+        console.log( 'Gemini: Queue length is ' + batchQueue.length );
+        
+        // Start the queue
+        processNextBatch();
     }
 
-    function fetchBatch( strings, targetLang, elementMap ) {
-        console.log( 'Gemini: Sending batch request...' );
-        
+    function processNextBatch() {
+        if ( batchQueue.length === 0 ) {
+            console.log( 'Gemini: Translation complete.' );
+            return;
+        }
+
+        var currentBatch = batchQueue.shift(); // Get first item
+        var remaining = batchQueue.length;
+
         $.ajax( {
             method: 'POST',
             url: mw.util.wikiScript( 'rest' ) + '/gemini-translator/translate_batch',
             contentType: 'application/json',
-            data: JSON.stringify( { strings: strings, targetLang: targetLang } )
+            data: JSON.stringify( { strings: currentBatch, targetLang: targetLang } )
         } ).done( function( data ) {
-            console.log( 'Gemini: Received response for ' + Object.keys(data.translations).length + ' strings.' );
-            applyTranslations( data.translations, elementMap );
-        }).fail( function( err ) {
-            console.error( 'Gemini: Batch failed', err );
+            // 1. Success! Update UI
+            applyTranslations( data.translations );
+            
+            // 2. Wait a small delay (500ms) to be nice to the API, then process next
+            if ( remaining > 0 ) {
+                setTimeout( processNextBatch, 500 );
+            }
+        }).fail( function( xhr ) {
+            // 3. Failure! Stop the entire queue.
+            console.error( 'Gemini: Batch failed. Stopping queue to save quota.' );
+            
+            // Mark the failed batch as error
+            markAsError( currentBatch );
+            
+            // Mark all remaining queued items as error (since we aren't sending them)
+            batchQueue.forEach( function( batch ) {
+                markAsError( batch );
+            });
+            batchQueue = []; // Clear queue
         });
     }
 
-    function applyTranslations( translations, elementMap ) {
+    function applyTranslations( translations ) {
         $.each( translations, function( original, translated ) {
             var $elements = elementMap.get( original );
             if ( $elements ) {
                 $elements.forEach( function( $el ) {
-                    // Replace immediately
                     $el.replaceWith( document.createTextNode( translated ) );
+                });
+            }
+        });
+    }
+
+    function markAsError( strings ) {
+        strings.forEach( function( str ) {
+            var $elements = elementMap.get( str );
+            if ( $elements ) {
+                $elements.forEach( function( $el ) {
+                    $el.css( {
+                        'animation': 'none',
+                        'background': '#ffdddd', 
+                        'border': '1px solid red',
+                        'cursor': 'help'
+                    } );
+                    $el.attr( 'title', 'Translation failed or aborted.' );
                 });
             }
         });
@@ -120,7 +154,6 @@ console.log('Gemini: Loaded v11 bootstrap.js');
 
     // --- Initialization ---
     $( function () {
-        // 1. Menu Handler
         var windowManager = new OO.ui.WindowManager();
         $( 'body' ).append( windowManager.$element );
         var dialog = new GeminiDialog();
@@ -130,7 +163,6 @@ console.log('Gemini: Loaded v11 bootstrap.js');
             windowManager.openWindow( dialog );
         } );
 
-        // 2. Virtual Page Handler
         if ( $( 'body' ).hasClass( 'gemini-virtual-page' ) ) {
             $( '.noarticletext' ).hide();
             processTokens();
