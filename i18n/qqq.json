@@ -4,12 +4,15 @@
 			"Sarah Haslip"
 		]
 	},
-	"geminitranslator-desc": "Extension description displayed on [[Special:Version]].",
-	"geminitranslator-ca-translate": "Label for the sidebar/menu action link that triggers the translation dialog.",
-	"geminitranslator-ui-translating": "Message displayed while the translation process is running.",
-	"geminitranslator-ui-translated": "Message displayed (e.g., in a banner) after content has been translated.",
-	"geminitranslator-ui-error": "Generic error message displayed to the user if translation fails.",
-	"geminitranslator-ui-original": "Link or button text to revert the translation to the original source.",
-	"geminitranslator-error-no-api-key": "Backend error message when the extension cannot find the API key.",
-	"geminitranslator-error-bad-response": "Backend error message when the API response format is unexpected."
+	"geminitranslator-desc": "{{desc|name=GeminiTranslator|url=https://www.mediawiki.org/wiki/Extension:GeminiTranslator}}",
+	"geminitranslator-ca-translate": "Label for the tab or menu item that opens the translation dialog.",
+	"geminitranslator-dialog-title": "Title of the popup dialog window where users select the language.",
+	"geminitranslator-dialog-prompt": "Label asking the user to input the language code (e.g., 'es').",
+	"geminitranslator-dialog-go": "Label for the primary action button to start translation.",
+	"geminitranslator-dialog-cancel": "Label for the cancel button in the dialog.",
+	"geminitranslator-login-required": "Warning message shown to anonymous users on virtual pages. Links to the login page.",
+	"geminitranslator-viewing-live": "Notice shown at the top of a translated page.\n* $1 is the full title of the original page (for the link).\n* $2 is the display text of the original page title.",
+	"geminitranslator-ui-error": "Tooltip text shown when hovering over a specific block of text that failed to translate.",
+	"geminitranslator-error-no-api-key": "Error message shown when the extension is not configured correctly on the server.",
+	"geminitranslator-error-bad-response": "Error message shown when Google Gemini returns 500 or malformed JSON."
 }
