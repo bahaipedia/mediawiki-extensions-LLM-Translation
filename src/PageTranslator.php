@@ -94,37 +94,42 @@ class PageTranslator {
 		if ( !empty( $toTranslate ) ) {
 			$apiInput = array_values( $toTranslate );
 			
-			// DEBUG: Verify we are actually trying to send
 			error_log( "GEMINI DEBUG: Attempting to translate " . count($apiInput) . " items..." );
 
 			$apiStatus = $this->client->translateBlocks( $apiInput, $targetLang );
 
-			if ( $apiStatus->isOK() ) {
-				$results = $apiStatus->getValue();
-				$keys = array_keys( $toTranslate );
-				$newRows = [];
-
-				foreach ( $results as $i => $translatedText ) {
-					if ( isset( $keys[$i] ) ) {
-						$h = $keys[$i];
-						$cached[$h] = $translatedText; 
-						$newRows[$h] = $translatedText;
-					}
-				}
-				$this->saveToDb( $newRows, $targetLang );
-			} else {
-				// !!! CRITICAL FIX: Log the error, don't hide it !!!
+			if ( !$apiStatus->isOK() ) {
+				// FAIL HARD: Do not fallback. Throw exception immediately.
 				$errors = $apiStatus->getErrors();
+				$msg = isset($errors[0]['message']) ? $errors[0]['message'] : 'Unknown API Error';
 				error_log( "GEMINI API ERROR: " . print_r( $errors, true ) );
+				throw new \RuntimeException( "Gemini API Failed: $msg" );
 			}
+
+			// If success, save to DB
+			$results = $apiStatus->getValue();
+			$keys = array_keys( $toTranslate );
+			$newRows = [];
+
+			foreach ( $results as $i => $translatedText ) {
+				if ( isset( $keys[$i] ) ) {
+					$h = $keys[$i];
+					$cached[$h] = $translatedText; 
+					$newRows[$h] = $translatedText;
+				}
+			}
+			$this->saveToDb( $newRows, $targetLang );
 		}
 
 		// 4. Build Result
 		$finalResults = [];
 		foreach ( $strings as $text ) {
 			$h = hash( 'sha256', trim( $text ) );
-			// Fallback to original text if translation missing
-			$finalResults[$text] = $cached[$h] ?? $text;
+			// Only return if we actually have a translation.
+			// If we missed cache and API didn't return it (rare edge case), return null.
+			if ( isset( $cached[$h] ) ) {
+				$finalResults[$text] = $cached[$h];
+			}
 		}
 
 		return $finalResults;
