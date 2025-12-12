@@ -11,15 +11,19 @@ use MediaWiki\Extension\GeminiTranslator\PageTranslator;
 class SkeletonBuilder {
 
 	private PageTranslator $translator;
+	
 	private const IGNORE_TAGS = [ 'style', 'script', 'link', 'meta' ];
-	private const IGNORE_NAMESPACES = [ 'Special:', 'File:', 'Image:', 'Help:', 'Category:', 'MediaWiki:', 'Talk:', 'User:' ];
+	
+	// Namespaces to ignore when rewriting links (we only want to translate content pages)
+	private const IGNORE_NAMESPACES = [ 
+		'Special:', 'File:', 'Image:', 'Help:', 'Category:', 'MediaWiki:', 'Talk:', 'User:' 
+	];
 
 	public function __construct( PageTranslator $translator ) {
 		$this->translator = $translator;
 	}
 
-	// Added $isReadOnly parameter
-	public function createSkeleton( string $html, string $targetLang, bool $isReadOnly ): string {
+	public function createSkeleton( string $html, string $targetLang ): string {
 		if ( trim( $html ) === '' ) {
 			return '';
 		}
@@ -29,16 +33,21 @@ class SkeletonBuilder {
 		$dom->loadHTML( '<?xml encoding="utf-8" ?>' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD );
 		libxml_clear_errors();
 
+		// PHASE 0: Rewrite Links
 		$this->rewriteLinks( $dom, $targetLang );
 
+		// PHASE 1: Harvest all text nodes
 		$textNodes = []; 
 		$rawStrings = [];
 		
 		$this->harvestNodes( $dom->documentElement, $textNodes, $rawStrings );
 
+		// PHASE 2: Check Cache
 		$cached = $this->translator->getCachedTranslations( array_unique( $rawStrings ), $targetLang );
 
+		// PHASE 3: Apply Cache or Tokenize
 		foreach ( $textNodes as $item ) {
+			/** @var DOMText $node */
 			$node = $item['node'];
 			$text = $item['text'];
 			$lSpace = $item['lSpace'];
@@ -47,6 +56,7 @@ class SkeletonBuilder {
 			if ( isset( $cached[$text] ) ) {
 				$this->replaceWithText( $dom, $node, $lSpace, $cached[$text], $rSpace );
 			} else {
+				// We removed the $isReadOnly check here because VirtualPageDisplay handles it now.
 				$this->replaceWithToken( $dom, $node, $lSpace, $text, $rSpace );
 			}
 		}
@@ -54,13 +64,8 @@ class SkeletonBuilder {
 		return $dom->saveHTML();
 	}
 
-	/**
-	 * Scans the DOM for links and points them to the /lang version
-	 */
 	private function rewriteLinks( DOMDocument $dom, string $lang ): void {
 		$links = $dom->getElementsByTagName( 'a' );
-		
-		// Convert to array to avoid modification issues during iteration
 		$linkList = iterator_to_array( $links );
 
 		foreach ( $linkList as $link ) {
@@ -68,23 +73,10 @@ class SkeletonBuilder {
 			$href = $link->getAttribute( 'href' );
 			$class = $link->getAttribute( 'class' );
 
-			// 1. Skip Red Links (Pages that don't exist in English)
-			if ( strpos( $class, 'new' ) !== false ) {
-				continue;
-			}
+			if ( strpos( $class, 'new' ) !== false ) { continue; }
+			if ( strpos( $href, '//' ) !== false || strpos( $href, '#' ) === 0 ) { continue; }
+			if ( strpos( $href, '/index.php?' ) !== false ) { continue; }
 
-			// 2. Skip External Links or Anchors
-			if ( strpos( $href, '//' ) !== false || strpos( $href, '#' ) === 0 ) {
-				continue;
-			}
-
-			// 3. Only rewrite standard Wiki links (/wiki/Title or /Title depending on config)
-			// We look for relative paths that don't start with query strings
-			if ( strpos( $href, '/index.php?' ) !== false ) {
-				continue; // Skip complicated script calls
-			}
-
-			// 4. Decode URL to check Namespaces
 			$decoded = urldecode( $href );
 			$isSpecial = false;
 			foreach ( self::IGNORE_NAMESPACES as $ns ) {
@@ -93,13 +85,8 @@ class SkeletonBuilder {
 					break;
 				}
 			}
-			if ( $isSpecial ) {
-				continue;
-			}
+			if ( $isSpecial ) { continue; }
 
-			// 5. Append Language Code
-			// Logic: If href is "/wiki/Apple", become "/wiki/Apple/es"
-			// Handle trailing slash edge case
 			$newHref = rtrim( $href, '/' ) . '/' . $lang;
 			$link->setAttribute( 'href', $newHref );
 		}
@@ -108,7 +95,6 @@ class SkeletonBuilder {
 	private function harvestNodes( $node, array &$textNodes, array &$rawStrings ): void {
 		if ( !$node ) { return; }
 
-		// Skip References
 		if ( $node instanceof DOMElement ) {
 			$class = $node->getAttribute( 'class' );
 			if ( 
