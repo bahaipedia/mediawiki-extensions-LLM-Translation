@@ -94,15 +94,16 @@ class PageTranslator {
 		if ( !empty( $toTranslate ) ) {
 			$apiInput = array_values( $toTranslate );
 			
-			error_log( "GEMINI DEBUG: Attempting to translate " . count($apiInput) . " items..." );
+			// RESTORED LOGGING: See exactly how many items are being sent
+			error_log( "GEMINI DEBUG: PageTranslator sending " . count($apiInput) . " items to Client." );
 
 			$apiStatus = $this->client->translateBlocks( $apiInput, $targetLang );
 
 			if ( !$apiStatus->isOK() ) {
-				// FAIL HARD: Do not fallback. Throw exception immediately.
+				// FAIL HARD & LOG
 				$errors = $apiStatus->getErrors();
 				$msg = isset($errors[0]['message']) ? $errors[0]['message'] : 'Unknown API Error';
-				error_log( "GEMINI API ERROR: " . print_r( $errors, true ) );
+				error_log( "GEMINI CRITICAL: API Failed. Details: " . print_r( $errors, true ) );
 				throw new \RuntimeException( "Gemini API Failed: $msg" );
 			}
 
@@ -125,8 +126,6 @@ class PageTranslator {
 		$finalResults = [];
 		foreach ( $strings as $text ) {
 			$h = hash( 'sha256', trim( $text ) );
-			// Only return if we actually have a translation.
-			// If we missed cache and API didn't return it (rare edge case), return null.
 			if ( isset( $cached[$h] ) ) {
 				$finalResults[$text] = $cached[$h];
 			}
