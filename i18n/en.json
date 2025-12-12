@@ -5,12 +5,15 @@
 			"HalloWelt! GmbH"
 		]
 },
-	"geminitranslator-desc": "AI-powered translation of page content using Gemini",
+	"geminitranslator-desc": "AI-powered translation of page content using Google Gemini.",
 	"geminitranslator-ca-translate": "Translate this page",
-	"geminitranslator-ui-translating": "Translating content...",
-	"geminitranslator-ui-translated": "The content below was automatically translated by Gemini.",
-	"geminitranslator-ui-error": "An error occurred while translating this section.",
-	"geminitranslator-ui-original": "Show original text",
+	"geminitranslator-dialog-title": "Translate Page",
+	"geminitranslator-dialog-prompt": "Enter target language code:",
+	"geminitranslator-dialog-go": "Go",
+	"geminitranslator-dialog-cancel": "Cancel",
+	"geminitranslator-login-required": "Please [[Special:UserLogin|log in]] to view or generate translations.",
+	"geminitranslator-viewing-live": "<strong>Translated Content:</strong> This page is a real-time translation of [[$1|$2]].",
+	"geminitranslator-ui-error": "Translation failed. Refresh to retry.",
 	"geminitranslator-error-no-api-key": "Gemini API key is missing or not configured.",
 	"geminitranslator-error-bad-response": "Received an invalid response from the Gemini API."
 }
