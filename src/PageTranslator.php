@@ -93,6 +93,10 @@ class PageTranslator {
 		// 3. Call API for misses
 		if ( !empty( $toTranslate ) ) {
 			$apiInput = array_values( $toTranslate );
+			
+			// DEBUG: Verify we are actually trying to send
+			error_log( "GEMINI DEBUG: Attempting to translate " . count($apiInput) . " items..." );
+
 			$apiStatus = $this->client->translateBlocks( $apiInput, $targetLang );
 
 			if ( $apiStatus->isOK() ) {
@@ -103,17 +107,23 @@ class PageTranslator {
 				foreach ( $results as $i => $translatedText ) {
 					if ( isset( $keys[$i] ) ) {
 						$h = $keys[$i];
-						$cached[$h] = $translatedText;
+						$cached[$h] = $translatedText; 
 						$newRows[$h] = $translatedText;
 					}
 				}
 				$this->saveToDb( $newRows, $targetLang );
+			} else {
+				// !!! CRITICAL FIX: Log the error, don't hide it !!!
+				$errors = $apiStatus->getErrors();
+				error_log( "GEMINI API ERROR: " . print_r( $errors, true ) );
 			}
 		}
 
+		// 4. Build Result
 		$finalResults = [];
 		foreach ( $strings as $text ) {
 			$h = hash( 'sha256', trim( $text ) );
+			// Fallback to original text if translation missing
 			$finalResults[$text] = $cached[$h] ?? $text;
 		}
 
