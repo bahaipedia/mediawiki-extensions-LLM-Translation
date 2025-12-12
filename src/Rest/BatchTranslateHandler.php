@@ -15,15 +15,6 @@ class BatchTranslateHandler extends SimpleHandler {
 	}
 
 	public function execute() {
-		// 1. SECURITY: Block Anonymous Users
-		$user = $this->getAuthority()->getUser();
-		if ( !$user->isNamed() ) {
-			return $this->getResponseFactory()->createJson( [
-				'error' => 'Login required to trigger new translations.'
-			], 403 );
-		}
-
-		// 2. Validate Input
 		$body = $this->getValidatedBody();
 		$strings = $body['strings'] ?? [];
 		$targetLang = $body['targetLang'];
@@ -33,20 +24,11 @@ class BatchTranslateHandler extends SimpleHandler {
 			$strings = array_slice( $strings, 0, 50 );
 		}
 
-		// 3. Translate
-		try {
-			$translations = $this->translator->translateStrings( $strings, $targetLang );
-			
-			return $this->getResponseFactory()->createJson( [
-				'translations' => $translations
-			] );
+		$translations = $this->translator->translateStrings( $strings, $targetLang );
 
-		} catch ( \RuntimeException $e ) {
-			// Return a 500 error so the JS .fail() block triggers
-			return $this->getResponseFactory()->createJson( [
-				'error' => $e->getMessage()
-			], 500 );
-		}
+		return $this->getResponseFactory()->createJson( [
+			'translations' => $translations
+		] );
 	}
 
 	public function getBodyParamSettings(): array {
