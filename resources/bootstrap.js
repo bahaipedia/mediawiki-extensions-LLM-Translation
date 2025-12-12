@@ -1,9 +1,13 @@
 window.ext = window.ext || {};
 window.ext.geminiTranslator = window.ext.geminiTranslator || {};
-console.log('Gemini: Loaded v11 bootstrap.js');
+console.log('Gemini: Loaded v12 bootstrap.js');
 ( function ( mw, $ ) {
 
-    // --- Helper: Correctly decode UTF-8 from Base64 ---
+    // --- Configuration ---
+    var MAX_CONCURRENT = 5; // How many requests to send at once
+    var CHUNK_SIZE = 10;    // How many strings per request
+
+    // --- Helper: Decode Base64 UTF-8 ---
     function decodeBase64Utf8( base64 ) {
         try {
             var binaryString = atob( base64 );
@@ -13,7 +17,6 @@ console.log('Gemini: Loaded v11 bootstrap.js');
             }
             return new TextDecoder( 'utf-8' ).decode( bytes );
         } catch ( e ) {
-            console.error( 'Gemini: Failed to decode base64 token', e );
             return '';
         }
     }
@@ -46,11 +49,12 @@ console.log('Gemini: Loaded v11 bootstrap.js');
         return GeminiDialog.super.prototype.getActionProcess.call( this, action );
     };
 
-    // --- Serial Queue Logic ---
+    // --- Parallel Queue Logic ---
     var batchQueue = [];
-    var isProcessing = false;
+    var activeRequests = 0;
     var targetLang = '';
     var elementMap = new Map();
+    var queueStopped = false;
 
     function processTokens() {
         var $tokens = $( '.gemini-token' );
@@ -59,10 +63,9 @@ console.log('Gemini: Loaded v11 bootstrap.js');
         targetLang = mw.config.get( 'wgGeminiTargetLang' );
         if ( !targetLang ) return;
 
-        console.log( 'Gemini: Found ' + $tokens.length + ' tokens. Preparing queue...' );
+        console.log( 'Gemini: Found ' + $tokens.length + ' tokens.' );
 
         var uniqueStrings = [];
-        
         $tokens.each( function() {
             var $el = $( this );
             var raw = decodeBase64Utf8( $el.data( 'source' ) );
@@ -75,26 +78,29 @@ console.log('Gemini: Loaded v11 bootstrap.js');
             }
         });
 
-        // Split into batches of 5 strings
-        var chunkSize = 5;
-        for ( var i = 0; i < uniqueStrings.length; i += chunkSize ) {
-            batchQueue.push( uniqueStrings.slice( i, i + chunkSize ) );
+        // 1. Fill the Queue
+        for ( var i = 0; i < uniqueStrings.length; i += CHUNK_SIZE ) {
+            batchQueue.push( uniqueStrings.slice( i, i + CHUNK_SIZE ) );
         }
 
-        console.log( 'Gemini: Queue length is ' + batchQueue.length );
+        console.log( 'Gemini: Created ' + batchQueue.length + ' batches. Starting pool of ' + MAX_CONCURRENT + ' workers.' );
         
-        // Start the queue
-        processNextBatch();
+        // 2. Start Workers (Up to MAX_CONCURRENT)
+        var initialWorkers = Math.min( MAX_CONCURRENT, batchQueue.length );
+        for ( var w = 0; w < initialWorkers; w++ ) {
+            processNextBatch();
+        }
     }
 
     function processNextBatch() {
+        if ( queueStopped ) return;
         if ( batchQueue.length === 0 ) {
-            console.log( 'Gemini: Translation complete.' );
+            if ( activeRequests === 0 ) console.log( 'Gemini: All done.' );
             return;
         }
 
-        var currentBatch = batchQueue.shift(); // Get first item
-        var remaining = batchQueue.length;
+        activeRequests++;
+        var currentBatch = batchQueue.shift();
 
         $.ajax( {
             method: 'POST',
@@ -102,25 +108,20 @@ console.log('Gemini: Loaded v11 bootstrap.js');
             contentType: 'application/json',
             data: JSON.stringify( { strings: currentBatch, targetLang: targetLang } )
         } ).done( function( data ) {
-            // 1. Success! Update UI
+            // Success: Update UI
             applyTranslations( data.translations );
-            
-            // 2. Wait a small delay (500ms) to be nice to the API, then process next
-            if ( remaining > 0 ) {
-                setTimeout( processNextBatch, 500 );
-            }
         }).fail( function( xhr ) {
-            // 3. Failure! Stop the entire queue.
-            console.error( 'Gemini: Batch failed. Stopping queue to save quota.' );
-            
-            // Mark the failed batch as error
+            // Failure: Stop everything
+            console.error( 'Gemini: Batch failed. Stopping queue.' );
+            queueStopped = true;
             markAsError( currentBatch );
-            
-            // Mark all remaining queued items as error (since we aren't sending them)
-            batchQueue.forEach( function( batch ) {
-                markAsError( batch );
-            });
-            batchQueue = []; // Clear queue
+            // Fail remaining items immediately
+            batchQueue.forEach( function( batch ) { markAsError( batch ); } );
+            batchQueue = [];
+        }).always( function() {
+            activeRequests--;
+            // Worker is free, grab next job
+            processNextBatch();
         });
     }
 
@@ -146,13 +147,13 @@ console.log('Gemini: Loaded v11 bootstrap.js');
                         'border': '1px solid red',
                         'cursor': 'help'
                     } );
-                    $el.attr( 'title', 'Translation failed or aborted.' );
+                    $el.attr( 'title', 'Translation failed.' );
                 });
             }
         });
     }
 
-    // --- Initialization ---
+    // --- Init ---
     $( function () {
         var windowManager = new OO.ui.WindowManager();
         $( 'body' ).append( windowManager.$element );
