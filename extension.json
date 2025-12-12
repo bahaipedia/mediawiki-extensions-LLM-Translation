@@ -38,7 +38,7 @@
 				"geminitranslator-ui-translating",
 				"geminitranslator-ui-translated",
 				"geminitranslator-ui-error",
-				"geminitranslator-ui-original"
+				"geminitranslator-ui-retry"
 			],
 			"dependencies": [
 				"oojs-ui"
