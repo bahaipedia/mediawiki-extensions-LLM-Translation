@@ -1,6 +1,6 @@
 window.ext = window.ext || {};
 window.ext.geminiTranslator = window.ext.geminiTranslator || {};
-
+console.log('Gemini: Loaded v13 bootstrap.js');
 ( function ( mw, $ ) {
 
     // --- Configuration ---
