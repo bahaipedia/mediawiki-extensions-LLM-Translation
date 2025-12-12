@@ -26,26 +26,17 @@ class GeminiClient {
 		if ( empty( $blocks ) ) {
 			return StatusValue::newGood( [] );
 		}
-		
-		// 1. Prepare Referer (MOVED UP)
+
+		// 1. Prepare Referer
 		$referer = $this->serverUrl;
 		if ( strpos( $referer, '//' ) === 0 ) {
 			$referer = 'https:' . $referer;
 		}
 		$referer = rtrim( $referer, '/' ) . '/';
 
-		// 2. Logging
-		/*
-		$totalChars = 0;
-		foreach( $blocks as $b ) { $totalChars += strlen($b); }
-		wfDebugLog( 'GeminiTranslator', sprintf(
-			"API-REQ: Lang=%s | Blocks=%d | ApproxChars=%d | Referer=%s",
-			$targetLang,
-			count($blocks),
-			$totalChars,
-			$referer
-		));
-		*/
+		// 2. Logging - USE ERROR_LOG INSTEAD OF WFDEBUGLOG FOR NOW
+		// This prints to /var/log/php8.3-fpm.log so you can actually see it
+		error_log( sprintf( "GEMINI DEBUG: Sending %d blocks to %s. Referer: %s", count($blocks), $targetLang, $referer ) );
 
 		// 3. Prepare Payload
 		$promptParts = [];
@@ -65,7 +56,6 @@ class GeminiClient {
 
 		$jsonBody = json_encode( $payloadData, JSON_UNESCAPED_UNICODE );
 
-		// Increase timeout to 120 seconds to prevent 503 errors on large batches
 		$req = $this->httpFactory->create( $url, [ 
 			'method' => 'POST', 
 			'postData' => $jsonBody,
@@ -78,14 +68,17 @@ class GeminiClient {
 		$status = $req->execute();
 
 		if ( !$status->isOK() ) {
-			error_log( "GEMINI CLIENT: HTTP Error " . ($status->getErrors()[0]['message'] ?? 'Unknown') );
+			// LOG THE HTTP ERROR
+			$msg = $status->getErrors()[0]['message'] ?? 'Unknown';
+			error_log( "GEMINI HTTP ERROR: $msg" );
 			return StatusValue::newFatal( 'geminitranslator-ui-error', $status->getErrors() );
 		}
 
 		$result = json_decode( $req->getContent(), true );
 		
 		if ( isset( $result['error'] ) ) {
-			error_log( "GEMINI CLIENT: API Error: " . print_r( $result['error'], true ) );
+			// LOG THE API ERROR
+			error_log( "GEMINI API ERROR: " . print_r( $result['error'], true ) );
 			return StatusValue::newFatal( 'geminitranslator-ui-error' );
 		}
 		
@@ -97,7 +90,7 @@ class GeminiClient {
 			if ( json_last_error() === JSON_ERROR_NONE && is_array( $translatedBlocks ) ) {
 				return StatusValue::newGood( $translatedBlocks );
 			} else {
-				error_log( "GEMINI CLIENT: JSON Decode Error: " . substr( $rawText, 0, 100 ) );
+				error_log( "GEMINI DECODE ERROR: " . substr( $rawText, 0, 100 ) );
 			}
 		}
 
