@@ -20,22 +20,21 @@ class BatchTranslateHandler extends SimpleHandler {
 		$body = $this->getValidatedBody();
 		$strings = $body['strings'] ?? [];
 		$targetLang = $body['targetLang'];
-		$pageTitle = $body['pageTitle'] ?? 'Unknown Page'; // Received from JS
+		$pageTitle = $body['pageTitle'] ?? 'Unknown Page'; 
 		$request = $this->getRequest();
 
 		// --- LOGGING ---
 		try {
-			// 1. Get Real IP using Global Context (Handles Proxies/Varnish correctly)
-			// This fixes the "172..." internal IP issue.
+			// 1. Get Real IP 
 			$realIp = RequestContext::getMain()->getRequest()->getIP();
 			
 			// 2. Identify User
 			$authority = $this->getAuthority();
 			$user = $authority ? $authority->getUser() : null;
 
-			// 3. Log to file defined in $wgDebugLogGroups['GeminiTranslator']
-			// Format matches your request: "REALIP <ip> <Page Title> /<lang>"
-			$message = sprintf( "REALIP %s %s /%s", $realIp, $pageTitle, $targetLang );
+			// 3. Log to file
+			// Clean format: "76.133.12.56 Page/Name/en"
+			$message = sprintf( "%s %s", $realIp, $pageTitle );
 
 			LoggerFactory::getInstance( 'GeminiTranslator' )->info(
 				$message,
@@ -46,13 +45,11 @@ class BatchTranslateHandler extends SimpleHandler {
 				]
 			);
 		} catch ( \Throwable $e ) {
-			// Fallback if something goes wrong with logging
 			error_log( 'GeminiTranslator Logger Error: ' . $e->getMessage() );
 		}
 
 		// --- PROCESSING ---
 
-		// Limit batch size for safety
 		if ( count( $strings ) > 50 ) {
 			$strings = array_slice( $strings, 0, 50 );
 		}
@@ -66,7 +63,6 @@ class BatchTranslateHandler extends SimpleHandler {
 
 		} catch ( \RuntimeException $e ) {
 			
-			// Log API failures
 			LoggerFactory::getInstance( 'GeminiTranslator' )->error(
 				'API Failure',
 				[ 'error' => $e->getMessage() ]
