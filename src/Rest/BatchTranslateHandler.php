@@ -15,45 +15,21 @@ class BatchTranslateHandler extends SimpleHandler {
 	}
 
 	public function execute() {
+		$request = $this->getRequest();
 		$body = $this->getValidatedBody();
 		$strings = $body['strings'] ?? [];
 		$targetLang = $body['targetLang'];
 
-		// --- LOGGING (Wrapped to prevent 503 crashes) ---
-		// We use wfDebugLog which maps directly to $wgDebugLogGroups['GeminiTranslator']
-		try {
-			$totalChars = 0;
-			foreach ( $strings as $str ) {
-				if ( is_string( $str ) ) {
-					$totalChars += mb_strlen( $str );
-				}
-			}
-
-			$request = $this->getRequest();
-			// Defensive check for authority/user
-			$authority = $this->getAuthority();
-			$user = $authority ? $authority->getUser() : null;
-			
-			$logData = [
-				'event' => 'batch_request',
-				'ip' => $request->getIP(),
-				'target_lang' => $targetLang,
-				'string_count' => count( $strings ),
-				'total_chars' => $totalChars,
-				'user_id' => $user ? $user->getId() : 0,
-				'user_name' => $user ? $user->getName() : 'Unknown',
-				'timestamp' => date( 'c' )
-			];
-
-			// Write to the file defined in $wgDebugLogGroups['GeminiTranslator']
-			wfDebugLog( 'GeminiTranslator', json_encode( $logData ) );
-
-		} catch ( \Throwable $e ) {
-			// If logging fails, write to the main server error log but DO NOT stop execution
-			error_log( 'GeminiTranslator Logging Failed: ' . $e->getMessage() );
-		}
-
-		// --- TRANSLATION LOGIC ---
+		// --- LOGGING ---
+		// Using wfDebugLog to match $wgDebugLogGroups['GeminiTranslator']
+		$logData = [
+			'event' => 'batch_start',
+			'ip' => $request->getIP(),
+			'target_lang' => $targetLang,
+			'count' => count( $strings ),
+			'user_agent' => $request->getHeader( 'User-Agent' )
+		];
+		wfDebugLog( 'GeminiTranslator', json_encode( $logData ) );
 
 		// Limit batch size for safety
 		if ( count( $strings ) > 50 ) {
@@ -68,6 +44,9 @@ class BatchTranslateHandler extends SimpleHandler {
 			] );
 
 		} catch ( \RuntimeException $e ) {
+			
+			wfDebugLog( 'GeminiTranslator', 'ERROR: ' . $e->getMessage() );
+
 			// Return a 500 error so the JS .fail() block triggers
 			return $this->getResponseFactory()->createJson( [
 				'error' => $e->getMessage()
