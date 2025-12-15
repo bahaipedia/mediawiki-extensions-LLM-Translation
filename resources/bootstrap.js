@@ -1,11 +1,11 @@
 window.ext = window.ext || {};
 window.ext.geminiTranslator = window.ext.geminiTranslator || {};
-console.log('Gemini: Loaded v15 bootstrap.js');
+console.log('Gemini: Loaded v16 bootstrap.js');
 ( function ( mw, $ ) {
 
     // --- Configuration ---
-    var MAX_CONCURRENT = 5; // How many requests to send at once
-    var CHUNK_SIZE = 10;    // How many strings per request
+    var MAX_CONCURRENT = 5;
+    var CHUNK_SIZE = 10;
 
     // --- Helper: Decode Base64 UTF-8 ---
     function decodeBase64Utf8( base64 ) {
@@ -21,7 +21,7 @@ console.log('Gemini: Loaded v15 bootstrap.js');
         }
     }
 
-    // --- Dialog Logic ---
+    // --- Dialog Logic (No changes) ---
     function GeminiDialog( config ) {
         GeminiDialog.super.call( this, config );
     }
@@ -68,6 +68,9 @@ console.log('Gemini: Loaded v15 bootstrap.js');
         var uniqueStrings = [];
         $tokens.each( function() {
             var $el = $( this );
+            // Add a specific class to track loading state
+            $el.addClass('gemini-loading'); 
+            
             var raw = decodeBase64Utf8( $el.data( 'source' ) );
             if ( raw ) {
                 if ( !elementMap.has( raw ) ) {
@@ -94,41 +97,42 @@ console.log('Gemini: Loaded v15 bootstrap.js');
 
     function processNextBatch() {
         if ( queueStopped ) return;
+        
         if ( batchQueue.length === 0 ) {
-            if ( activeRequests === 0 ) console.log( 'Gemini: All done.' );
+            // FIX: Only declare "All done" if NO workers are active
+            if ( activeRequests === 0 ) {
+                console.log( 'Gemini: All done.' );
+                cleanupStragglers();
+            }
             return;
         }
 
         activeRequests++;
         var currentBatch = batchQueue.shift();
-
-        // Get the current page title
         var currentTitle = mw.config.get( 'wgPageName' ).replace( /_/g, ' ' );
 
         $.ajax( {
             method: 'POST',
             url: mw.util.wikiScript( 'rest' ) + '/gemini-translator/translate_batch',
             contentType: 'application/json',
-            // UPDATE: Added pageTitle to the JSON payload
             data: JSON.stringify( { 
                 strings: currentBatch, 
-                targetLang: targetLang,
-                pageTitle: currentTitle
+                targetLang: targetLang, 
+                pageTitle: currentTitle 
             } )
         } ).done( function( data ) {
-            // Success: Update UI
             applyTranslations( data.translations );
         }).fail( function( xhr ) {
-            // Failure: Stop everything
-            console.error( 'Gemini: Batch failed. Stopping queue.' );
+            console.error( 'Gemini: Batch failed.' );
+            // Mark JUST this batch as error, don't stop the whole queue if one fails?
+            // User preference: You previously stopped everything. Keeping that logic.
             queueStopped = true;
             markAsError( currentBatch );
-            // Fail remaining items immediately
             batchQueue.forEach( function( batch ) { markAsError( batch ); } );
             batchQueue = [];
+            cleanupStragglers(); // Clean up immediately if we crash
         }).always( function() {
             activeRequests--;
-            // Worker is free, grab next job
             processNextBatch();
         });
     }
@@ -138,8 +142,11 @@ console.log('Gemini: Loaded v15 bootstrap.js');
             var $elements = elementMap.get( original );
             if ( $elements ) {
                 $elements.forEach( function( $el ) {
+                    $el.removeClass('gemini-loading'); // Remove marker
                     $el.replaceWith( document.createTextNode( translated ) );
-                });
+                } );
+            } else {
+                console.warn('Gemini: Received translation for unknown key (hash mismatch?)');
             }
         });
     }
@@ -149,6 +156,7 @@ console.log('Gemini: Loaded v15 bootstrap.js');
             var $elements = elementMap.get( str );
             if ( $elements ) {
                 $elements.forEach( function( $el ) {
+                    $el.removeClass('gemini-loading');
                     $el.css( {
                         'animation': 'none',
                         'background': '#ffdddd', 
@@ -159,6 +167,21 @@ console.log('Gemini: Loaded v15 bootstrap.js');
                 });
             }
         });
+    }
+
+    // --- FIX: Cleanup Logic ---
+    // If the mapping failed (Gemini returned a slightly different string key),
+    // the UI elements will remain "loading" forever. This forces them to stop.
+    function cleanupStragglers() {
+        var $stuck = $( '.gemini-loading' );
+        if ( $stuck.length > 0 ) {
+            console.warn( 'Gemini: Found ' + $stuck.length + ' stuck elements. Marking as failed.' );
+            $stuck.each( function() {
+                $( this ).removeClass('gemini-loading')
+                         .css( { 'animation': 'none', 'border': '1px dashed orange' } )
+                         .attr( 'title', 'Translation missing (Mismatch error)' );
+            });
+        }
     }
 
     // --- Init ---
