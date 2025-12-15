@@ -3,6 +3,7 @@
 namespace MediaWiki\Extension\GeminiTranslator\Hook;
 
 use MediaWiki\Output\Hook\BeforePageDisplayHook;
+use MediaWiki\Title\Title;
 use MediaWiki\Html\Html;
 
 class AddContentAction implements BeforePageDisplayHook {
@@ -12,6 +13,7 @@ class AddContentAction implements BeforePageDisplayHook {
 	 */
 	public function onBeforePageDisplay( $out, $skin ): void {
 		$title = $out->getTitle();
+		$user = $skin->getUser();
 
 		// Validation: Don't show on special pages, non-existent pages, or edit mode
 		if ( !$title->exists() || $title->isSpecialPage() || $out->getActionName() === 'edit' ) {
@@ -20,21 +22,35 @@ class AddContentAction implements BeforePageDisplayHook {
 
 		$msgText = $skin->msg( 'geminitranslator-ca-translate' )->text();
 
-		// --- Unified Logic ---
-		// We allow both Anon and Logged-in users to access the feature.
-		// We use the ID 'ca-gemini-translate' so bootstrap.js can attach the click event.
-		$html = Html::element( 'a', [
-			'href' => '#',
-			'id' => 'ca-gemini-translate',
-			'class' => 'mw-indicator-gemini-translate',
-			'style' => 'cursor: pointer; font-weight: bold;',
-			'title' => 'Translate this page using Gemini'
-		], $msgText );
+		// 1. Configure the Link HTML
+		if ( $user->isAnon() ) {
+			// Anon: Link to Help page
+			$helpTitle = Title::newFromText( 'Help:GeminiTranslator' );
+			$url = $helpTitle ? $helpTitle->getLinkURL() : '#';
+			
+			// We create a standard link
+			$html = Html::element( 'a', [
+				'href' => $url,
+				'class' => 'mw-indicator-gemini-translate',
+				'title' => 'Learn about translation'
+			], $msgText );
 
-		// Load the JS module for everyone
-		$out->addModules( [ 'ext.geminitranslator.bootstrap' ] );
+		} else {
+			// Logged In: JS Trigger
+			// We MUST use the ID 'ca-gemini-translate' because bootstrap.js is looking for it
+			$html = Html::element( 'a', [
+				'href' => '#',
+				'id' => 'ca-gemini-translate',
+				'class' => 'mw-indicator-gemini-translate',
+				'style' => 'cursor: pointer; font-weight: bold;'
+			], $msgText );
 
-		// Add to Page Indicators
+			// Load the JS module
+			$out->addModules( [ 'ext.geminitranslator.bootstrap' ] );
+		}
+
+		// 2. Add to Page Indicators
+		// The key 'gemini-status' is arbitrary but useful for sorting if needed
 		$out->setIndicators( [ 'gemini-status' => $html ] );
 	}
 }
