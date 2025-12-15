@@ -4,8 +4,8 @@ namespace MediaWiki\Extension\GeminiTranslator\Rest;
 
 use MediaWiki\Extension\GeminiTranslator\PageTranslator;
 use MediaWiki\Logger\LoggerFactory;
+use MediaWiki\Context\RequestContext;
 use MediaWiki\Rest\SimpleHandler;
-use MediaWiki\Context\RequestContext; // Added to get the real IP
 use Wikimedia\ParamValidator\ParamValidator;
 
 class BatchTranslateHandler extends SimpleHandler {
@@ -20,29 +20,33 @@ class BatchTranslateHandler extends SimpleHandler {
 		$body = $this->getValidatedBody();
 		$strings = $body['strings'] ?? [];
 		$targetLang = $body['targetLang'];
+		$pageTitle = $body['pageTitle'] ?? 'Unknown Page'; // Received from JS
 		$request = $this->getRequest();
 
 		// --- LOGGING ---
 		try {
-			// FIX: Use RequestContext to get the IP. 
-			// The REST $request object does not have getIP(), but the global context does.
+			// 1. Get Real IP using Global Context (Handles Proxies/Varnish correctly)
+			// This fixes the "172..." internal IP issue.
 			$realIp = RequestContext::getMain()->getRequest()->getIP();
 			
+			// 2. Identify User
 			$authority = $this->getAuthority();
 			$user = $authority ? $authority->getUser() : null;
 
+			// 3. Log to file defined in $wgDebugLogGroups['GeminiTranslator']
+			// Format matches your request: "REALIP <ip> <Page Title> /<lang>"
+			$message = sprintf( "REALIP %s %s /%s", $realIp, $pageTitle, $targetLang );
+
 			LoggerFactory::getInstance( 'GeminiTranslator' )->info(
-				'Batch request received',
+				$message,
 				[
-					'ip' => $realIp,
-					'target_lang' => $targetLang,
 					'count' => count( $strings ),
 					'user' => $user ? $user->getName() : 'Unknown',
 					'user_agent' => $request->getHeader( 'User-Agent' )
 				]
 			);
 		} catch ( \Throwable $e ) {
-			// If logger fails, use error_log so we don't crash the translation
+			// Fallback if something goes wrong with logging
 			error_log( 'GeminiTranslator Logger Error: ' . $e->getMessage() );
 		}
 
@@ -85,6 +89,12 @@ class BatchTranslateHandler extends SimpleHandler {
 				self::PARAM_SOURCE => 'body',
 				ParamValidator::PARAM_TYPE => 'string',
 				ParamValidator::PARAM_REQUIRED => true,
+			],
+			'pageTitle' => [
+				self::PARAM_SOURCE => 'body',
+				ParamValidator::PARAM_TYPE => 'string',
+				ParamValidator::PARAM_REQUIRED => false,
+				ParamValidator::PARAM_DEFAULT => 'Unknown Page',
 			]
 		];
 	}
